@@ -1,55 +1,32 @@
-import sys
-import shutil
-import textwrap
-from typing import Any, Callable, Dict
+import time
+import functools
+import random
 
+def retry(max_attempts=3, delay=1.0, backoff=2.0):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            attempts = 0
+            current_delay = delay
+            while attempts < max_attempts:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    attempts += 1
+                    if attempts == max_attempts:
+                        raise e
+                    sleep_time = current_delay + random.uniform(0, 0.1)
+                    time.sleep(sleep_time)
+                    current_delay *= backoff
+        return wrapper
+    return decorator
 
-class CliPipe:
-    """A lightweight pipe wrapper enabling chainable CLI operations."""
+@retry(max_attempts=4, delay=0.5)
+def fetch_data_mock(url):
+    # Simulate sporadic network instability
+    if random.random() < 0.7:
+        raise ConnectionError(f"failed to reach {url}")
+    return {"status": 200, "data": "payload"}
 
-    def __init__(self, value: Any):
-        self.value = value
-
-    def __or__(self, func: Callable[[Any], Any]) -> "CliPipe":
-        return CliPipe(func(self.value))
-
-    def __str__(self) -> str:
-        return str(self.value)
-
-    def emit(self, stream=sys.stdout) -> None:
-        stream.write(f"{self.value}\n")
-
-
-def truncate(width: int = 0) -> Callable[[str], str]:
-    cols = width or shutil.get_terminal_size().columns
-    return lambda text: textwrap.shorten(str(text), width=cols, placeholder="...")
-
-
-def colorize(code: int) -> Callable[[str], str]:
-    return lambda text: f"\033[{code}m{text}\033[0m"
-
-
-def banner(char: str = "=") -> Callable[[str], str]:
-    def _wrap(text: str) -> str:
-        cols = shutil.get_terminal_size().columns
-        line = char * cols
-        return f"{line}\n{str(text).center(cols)}\n{line}"
-
-    return _wrap
-
-
-def kv_table(indent: int = 2) -> Callable[[Dict[str, Any]], str]:
-    def _format(data: Dict[str, Any]) -> str:
-        if not data:
-            return ""
-        max_k = max(len(str(k)) for k in data.keys())
-        pad = " " * indent
-        return "\n".join(
-            f"{pad}{str(k).ljust(max_k)} : {v}" for k, v in data.items()
-        )
-
-    return _format
-
-
-def pipeline(value: Any) -> CliPipe:
-    return CliPipe(value)
+if __name__ == '__main__':
+    print(fetch_data_mock('https://api.example.com'))
