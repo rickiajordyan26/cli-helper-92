@@ -1,28 +1,34 @@
-import time
-from functools import lru_cache
+import sys
+import logging
+from functools import wraps
 
-class PerformanceLogger:
-    _buffer = []
+class ExceptionGuard:
+    def __init__(self, logger_name="cli-helper-92"):
+        self.logger = logging.getLogger(logger_name)
+        self.logger.setLevel(logging.ERROR)
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(logging.Formatter('%(asctime)s | %(levelname)s | %(message)s'))
+        self.logger.addHandler(handler)
 
-    def __init__(self, limit=1000):
-        self.limit = limit
+    def __call__(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except KeyboardInterrupt:
+                self.logger.critical("Process interrupted by user session")
+                sys.exit(130)
+            except EOFError:
+                self.logger.warning("Unexpected stream closure detected")
+                return None
+            except Exception as e:
+                self.logger.error(f"Unhandled edge case in {func.__name__}: {str(e)}")
+                return self._fallback_response(e)
+        return wrapper
 
-    @staticmethod
-    @lru_cache(maxsize=128)
-    def _format_timestamp(ts):
-        return time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(ts))
+    def _fallback_response(self, error):
+        if isinstance(error, (ValueError, TypeError)):
+            return None
+        raise error
 
-    def log(self, message):
-        entry = f"[{self._format_timestamp(time.time())}] {message}"
-        self._buffer.append(entry)
-        if len(self._buffer) > self.limit:
-            self._flush()
-
-    def _flush(self):
-        with open('app.log', 'a') as f:
-            f.write('\n'.join(self._buffer) + '\n')
-        self._buffer.clear()
-
-    def __del__(self):
-        if self._buffer:
-            self._flush()
+logger = ExceptionGuard()
