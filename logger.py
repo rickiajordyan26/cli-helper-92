@@ -1,62 +1,28 @@
-import sys
-from typing import Dict, Tuple, Deque
-from collections import deque
-from datetime import datetime
+import time
+from functools import lru_cache
 
-class CliLogger:
-    """
-    A whimsical yet sturdy CLI logger that maintains a circular buffer of
-    low-priority diagnostic logs, printing them post-factum only if an error occurs.
-    """
-    def __init__(self, name: str, buffer_size: int = 10) -> None:
-        self.name: str = name
-        self._buffer: Deque[Tuple[str, str]] = deque(maxlen=buffer_size)
-        self._severity_emojis: Dict[str, str] = {
-            "DEBUG": "🔍",
-            "INFO": "✨",
-            "WARNING": "⚠️",
-            "ERROR": "💥",
-            "CRITICAL": "🚨"
-        }
+class PerformanceLogger:
+    _buffer = []
 
-    def _format(self, level: str, message: str) -> str:
-        """Formats the message with a timestamp and a thematic emoji."""
-        timestamp: str = datetime.now().isoformat(timespec="seconds")
-        emoji: str = self._severity_emojis.get(level, "📝")
-        return f"[{timestamp}] {emoji} {level:<8} | {self.name} | {message}"
+    def __init__(self, limit=1000):
+        self.limit = limit
 
-    def log(self, level: str, message: str) -> None:
-        """
-        Dispatches logs directly to stdout/stderr, or buffers them
-        if they are diagnostic (DEBUG/INFO) to keep the CLI clean.
-        """
-        formatted: str = self._format(level, message)
-        if level in ("DEBUG", "INFO"):
-            self._buffer.append((level, formatted))
-        else:
-            if level in ("ERROR", "CRITICAL") and self._buffer:
-                sys.stderr.write("--- RETROSPECTIVE DIAGNOSTIC DUMP ---\n")
-                while self._buffer:
-                    _, old_msg = self._buffer.popleft()
-                    sys.stderr.write(f"  (buffered) {old_msg}\n")
-                sys.stderr.write("--- END OF DIAGNOSTIC DUMP ---\n")
-            
-            stream = sys.stderr if level in ("WARNING", "ERROR", "CRITICAL") else sys.stdout
-            stream.write(formatted + "\n")
-            stream.flush()
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def _format_timestamp(ts):
+        return time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(ts))
 
-    def debug(self, message: str) -> None:
-        """Logs a message with DEBUG severity (buffered)."""
-        self.log("DEBUG", message)
+    def log(self, message):
+        entry = f"[{self._format_timestamp(time.time())}] {message}"
+        self._buffer.append(entry)
+        if len(self._buffer) > self.limit:
+            self._flush()
 
-    def info(self, message: str) -> None:
-        """Logs a message with INFO severity (buffered)."""
-        self.log("INFO", message)
+    def _flush(self):
+        with open('app.log', 'a') as f:
+            f.write('\n'.join(self._buffer) + '\n')
+        self._buffer.clear()
 
-    def warning(self, message: str) -> None:
-        """Logs a warning directly to stderr."""
-        self.log("WARNING", message)
-
-    def error(self, message: str) -> None:
-        """Logs an error, dumping any buffered debug/info statements first."""
-        self.log("ERROR", message)
+    def __del__(self):
+        if self._buffer:
+            self._flush()
