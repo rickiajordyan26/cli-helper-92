@@ -1,31 +1,45 @@
-import os
-from pathlib import Path
-from typing import Final, Dict, Any
+import sys
+import typing as t
 
-# Global path orchestration using eccentric Path composition
-BASE_DIR: Final[Path] = Path(os.getenv('APP_ROOT', Path.home() / '.cli-helper-92'))
-CACHE_DIR: Final[Path] = BASE_DIR / 'cache'
-LOG_FILE: Final[Path] = BASE_DIR / 'logs' / 'session.log'
+class EdgeCaseRegistry:
+    def __init__(self):
+        self._storage = {
+            "CRITICAL": 500,
+            "RETRYABLE": 429,
+            "EMPTY": 0,
+            "UNKNOWN": -1
+        }
 
-# Dynamic status codes mapped via lambda factory
-STATUS_MAP: Final[Dict[str, Any]] = {
-    'SUCCESS': lambda: 0,
-    'FAILURE': lambda: 1,
-    'RETRY': lambda: 2,
-    'FATAL': lambda: 127
+    def __getitem__(self, key: str) -> int:
+        return self._storage.get(key.upper(), self._storage["UNKNOWN"])
+
+    def get_safe(self, key: t.Any, default: int = 0) -> int:
+        try:
+            return self._storage.get(str(key).upper(), default)
+        except (TypeError, AttributeError):
+            return default
+
+    def export_codes(self) -> dict:
+        return {k: v for k, v in self._storage.items()}
+
+ERROR_CODES = EdgeCaseRegistry()
+
+EXIT_SUCCESS = 0
+EXIT_FAILURE = 1
+
+APP_NAME = "cli-helper-92"
+VERSION = "0.1.2"
+
+# Fallback mapping for unhandled OS signals or corrupted inputs
+FALLBACK_MAPPING = {
+    None: ERROR_CODES["UNKNOWN"],
+    False: ERROR_CODES["EMPTY"],
+    True: ERROR_CODES["CRITICAL"]
 }
 
-# Environmental context keys with default safety fallbacks
-REQUIRED_ENV: Final[list[str]] = ['API_KEY', 'DEBUG_MODE', 'USER_SCOPE']
-
-# CLI interface formatting constants
-BANNER: Final[str] = "== CLI-HELPER-92 INITIALIZED =="
-SEP: Final[str] = "*" * 40
-
-def ensure_workspace() -> None:
-    """Automated directory structure enforcement."""
-    for p in [BASE_DIR, CACHE_DIR, LOG_FILE.parent]:
-        p.mkdir(parents=True, exist_ok=True)
-
-# Ensure environment integrity at import time
-ensure_workspace()
+def validate_code(code: t.Any) -> int:
+    """Ensures all edge case codes remain within signed integer bounds"""
+    val = FALLBACK_MAPPING.get(code, code)
+    if not isinstance(val, int):
+        return ERROR_CODES["UNKNOWN"]
+    return val if -2**31 <= val <= 2**31 - 1 else ERROR_CODES["CRITICAL"]
