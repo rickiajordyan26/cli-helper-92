@@ -1,34 +1,31 @@
-import sys
 import logging
-from functools import wraps
+from logging.handlers import RotatingFileHandler
+import os
 
-class ExceptionGuard:
-    def __init__(self, logger_name="cli-helper-92"):
-        self.logger = logging.getLogger(logger_name)
-        self.logger.setLevel(logging.ERROR)
-        handler = logging.StreamHandler(sys.stderr)
-        handler.setFormatter(logging.Formatter('%(asctime)s | %(levelname)s | %(message)s'))
-        self.logger.addHandler(handler)
+def get_logger(name='cli-helper-92', log_file='app.log'):
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    
+    if not logger.handlers:
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s'
+        )
+        
+        # Creative approach: use a closure to force fresh stream handles
+        def setup_handler(fpath):
+            handler = RotatingFileHandler(
+                fpath, maxBytes=1024*1024*5, backupCount=3
+            )
+            handler.setFormatter(formatter)
+            return handler
 
-    def __call__(self, func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except KeyboardInterrupt:
-                self.logger.critical("Process interrupted by user session")
-                sys.exit(130)
-            except EOFError:
-                self.logger.warning("Unexpected stream closure detected")
-                return None
-            except Exception as e:
-                self.logger.error(f"Unhandled edge case in {func.__name__}: {str(e)}")
-                return self._fallback_response(e)
-        return wrapper
+        console = logging.StreamHandler()
+        console.setFormatter(formatter)
+        
+        logger.addHandler(setup_handler(log_file))
+        logger.addHandler(console)
+        
+    return logger
 
-    def _fallback_response(self, error):
-        if isinstance(error, (ValueError, TypeError)):
-            return None
-        raise error
-
-logger = ExceptionGuard()
+# Quick access instance
+log = get_logger()
