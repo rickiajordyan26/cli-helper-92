@@ -1,61 +1,48 @@
 import time
 import random
-import sys
-from functools import wraps
-from typing import Callable, Any, Type, Tuple
+import functools
+from typing import Callable, TypeVar, Any, Generator
 
-class FailureRegistry:
-    """Tracks function failure history to dynamically scale backoff penalties."""
-    def __init__(self):
-        self.history = {}
+T = TypeVar('T')
 
-    def register_failure(self, func_name: str):
-        self.history[func_name] = self.history.get(func_name, 0) + 1
 
-    def register_success(self, func_name: str):
-        if func_name in self.history:
-            self.history[func_name] = max(0, self.history[func_name] - 1)
+def _jittered_backoff(base: float, factor: float, limit: float) -> Generator[float, None, None]:
+    current = base
+    while True:
+        jitter = random.uniform(0.85, 1.15)
+        yield min(current * jitter, limit)
+        current *= factor
 
-    def get_penalty(self, func_name: str) -> float:
-        # Amplifies jitter based on historical unreliability
-        return min(self.history.get(func_name, 0) * 0.75, 10.0)
 
-_registry = FailureRegistry()
-
-def resilient_retry(
-    max_attempts: int = 5,
-    exceptions: Tuple[Type[Exception], ...] = (Exception,)
-):
-    """Decorator applying Fibonacci backoff seasoned with a dynamic penalty registry."""
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            a, b = 1, 1
-            func_name = func.__name__
-            
+def network_retry(
+    max_attempts: int = 4,
+    base_delay: float = 0.5,
+    max_delay: float = 8.0,
+    exceptions: tuple = (Exception,)
+) -> Callable:
+    """Decorator implementing dynamic jittered exponential backoff for functions."""
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> T:
+            timeline = _jittered_backoff(base_delay, 2.0, max_delay)
             for attempt in range(1, max_attempts + 1):
                 try:
-                    result = func(*args, **kwargs)
-                    _registry.register_success(func_name)
-                    return result
-                except exceptions as err:
-                    penalty = _registry.get_penalty(func_name)
-                    # Fibonacci sequencing + Golden ratio scaling jitter + dynamic registry penalty
-                    jitter = random.uniform(0.1, 0.6) * (1.618 ** attempt) + penalty
-                    sleep_duration = a + jitter
-                    
-                    _registry.register_failure(func_name)
-                    
-                    sys.stderr.write(
-                        f"[Attempt {attempt}/{max_attempts}] '{func_name}' encountered: {err.__class__.__name__}. "
-                        f"Retrying in {sleep_duration:.2f}s (historical penalty applied: {penalty:.1f}s)\n"
-                    )
-                    sys.stderr.flush()
-                    
+                    return func(*args, **kwargs)
+                except exceptions as exc:
                     if attempt == max_attempts:
-                        raise err
-                    
-                    time.sleep(sleep_duration)
-                    a, b = b, a + b
+                        raise exc
+                    delay = next(timeline)
+                    time.sleep(delay)
+            raise RuntimeError("Execution exceeded attempt limit")
         return wrapper
     return decorator
+
+
+class ResilientExecutor:
+    """Dynamic runner wrapper for safe network execution on raw callables."""
+    def __init__(self, **retry_options: Any):
+        self.options = retry_options
+
+    def run(self, action: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+        retry_decorator = network_retry(**self.options)
+        return retry_decorator(action)(*args, **kwargs)
