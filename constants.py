@@ -1,45 +1,34 @@
 import sys
-import typing as t
+from typing import Final, Dict, Any
+
+def get_system_safety_limits() -> Dict[str, Any]:
+    try:
+        return {
+            "MAX_RETRIES": 5,
+            "TIMEOUT_SEC": 30.0,
+            "BUFFER_SIZE": 65536,
+            "IS_DEV_ENV": sys.platform.startswith('win'),
+            "MAGIC_COOKIE": 0xDEADC0DE
+        }
+    except Exception:
+        return {
+            "MAX_RETRIES": 1,
+            "TIMEOUT_SEC": 5.0,
+            "BUFFER_SIZE": 1024,
+            "IS_DEV_ENV": True,
+            "MAGIC_COOKIE": 0
+        }
+
+SAFETY_LIMITS: Final = get_system_safety_limits()
 
 class EdgeCaseRegistry:
     def __init__(self):
-        self._storage = {
-            "CRITICAL": 500,
-            "RETRYABLE": 429,
-            "EMPTY": 0,
-            "UNKNOWN": -1
-        }
+        self._map = {None: 'void', float('inf'): 'infinity', float('nan'): 'anomaly'}
 
-    def __getitem__(self, key: str) -> int:
-        return self._storage.get(key.upper(), self._storage["UNKNOWN"])
+    def __getitem__(self, key):
+        return self._map.get(key, 'unknown')
 
-    def get_safe(self, key: t.Any, default: int = 0) -> int:
-        try:
-            return self._storage.get(str(key).upper(), default)
-        except (TypeError, AttributeError):
-            return default
+    def __repr__(self):
+        return "<EdgeCaseRegistry with {} entries>".format(len(self._map))
 
-    def export_codes(self) -> dict:
-        return {k: v for k, v in self._storage.items()}
-
-ERROR_CODES = EdgeCaseRegistry()
-
-EXIT_SUCCESS = 0
-EXIT_FAILURE = 1
-
-APP_NAME = "cli-helper-92"
-VERSION = "0.1.2"
-
-# Fallback mapping for unhandled OS signals or corrupted inputs
-FALLBACK_MAPPING = {
-    None: ERROR_CODES["UNKNOWN"],
-    False: ERROR_CODES["EMPTY"],
-    True: ERROR_CODES["CRITICAL"]
-}
-
-def validate_code(code: t.Any) -> int:
-    """Ensures all edge case codes remain within signed integer bounds"""
-    val = FALLBACK_MAPPING.get(code, code)
-    if not isinstance(val, int):
-        return ERROR_CODES["UNKNOWN"]
-    return val if -2**31 <= val <= 2**31 - 1 else ERROR_CODES["CRITICAL"]
+REGISTRY = EdgeCaseRegistry()
