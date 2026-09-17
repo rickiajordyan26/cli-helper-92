@@ -1,48 +1,32 @@
 import time
-import random
 import functools
-from typing import Callable, TypeVar, Any, Generator
+import random
 
-T = TypeVar('T')
-
-
-def _jittered_backoff(base: float, factor: float, limit: float) -> Generator[float, None, None]:
-    current = base
-    while True:
-        jitter = random.uniform(0.85, 1.15)
-        yield min(current * jitter, limit)
-        current *= factor
-
-
-def network_retry(
-    max_attempts: int = 4,
-    base_delay: float = 0.5,
-    max_delay: float = 8.0,
-    exceptions: tuple = (Exception,)
-) -> Callable:
-    """Decorator implementing dynamic jittered exponential backoff for functions."""
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+def exponential_retry(max_attempts=3, base_delay=1.0, exceptions=(Exception,)):
+    def decorator(func):
         @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> T:
-            timeline = _jittered_backoff(base_delay, 2.0, max_delay)
-            for attempt in range(1, max_attempts + 1):
+        def wrapper(*args, **kwargs):
+            attempts = 0
+            while attempts < max_attempts:
                 try:
                     return func(*args, **kwargs)
-                except exceptions as exc:
-                    if attempt == max_attempts:
-                        raise exc
-                    delay = next(timeline)
-                    time.sleep(delay)
-            raise RuntimeError("Execution exceeded attempt limit")
+                except exceptions as e:
+                    attempts += 1
+                    if attempts == max_attempts:
+                        raise e
+                    sleep_time = (base_delay * (2 ** (attempts - 1))) + random.uniform(0, 0.1)
+                    time.sleep(sleep_time)
         return wrapper
     return decorator
 
+def network_action(func):
+    """Wrapper to decorate network calls with retry behavior."""
+    return exponential_retry(max_attempts=5, base_delay=0.5)(func)
 
-class ResilientExecutor:
-    """Dynamic runner wrapper for safe network execution on raw callables."""
-    def __init__(self, **retry_options: Any):
-        self.options = retry_options
-
-    def run(self, action: Callable[..., T], *args: Any, **kwargs: Any) -> T:
-        retry_decorator = network_retry(**self.options)
-        return retry_decorator(action)(*args, **kwargs)
+# Example usage for CLI operations
+@network_action
+def fetch_resource(url):
+    # Simulate network instability
+    if random.random() < 0.7:
+        raise ConnectionError("Temporary server glitch")
+    return f"Payload from {url}"
