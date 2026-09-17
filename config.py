@@ -1,58 +1,55 @@
+"""Dynamic configuration cascade engine for CLI options."""
+
 import os
-import json
-from typing import Any, Dict
+from typing import Any, TypeVar, Callable, Generic, Dict, Optional, Union
 
-class FallbackConfig:
-    """
-    A dynamic configuration loader resolving keys in sequence:
-    1. Environment variables (prefixed with CLI_HELPER_)
-    2. Local configuration JSON file
-    3. Default fallbacks
-    Coerces environment variable values to match the type of the default values.
-    """
-    def __init__(self, filepath: str, defaults: Dict[str, Any]):
-        self._filepath = filepath
-        self._defaults = defaults
-        self._file_config = self._load_file()
+T = TypeVar("T")
 
-    def _load_file(self) -> Dict[str, Any]:
-        if os.path.exists(self._filepath):
-            try:
-                with open(self._filepath, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, OSError):
-                pass
-        return {}
 
-    def __getattr__(self, name: str) -> Any:
-        key = name.lower()
-        if key not in self._defaults:
-            raise AttributeError(f"Configuration option '{name}' is undefined.")
+class ConfigValue(Generic[T]):
+    """Descriptor resolving dynamic configuration values with type casting."""
 
-        default_val = self._defaults[key]
-        env_key = f"CLI_HELPER_{name.upper()}"
+    def __init__(self, key: str, default: T, cast: Optional[Callable[[Any], T]] = None) -> None:
+        """Initialize a typed configuration key descriptor."""
+        self.key = key
+        self.default = default
+        self.cast = cast or (lambda x: type(default)(x))
 
-        if env_key in os.environ:
-            raw_val = os.environ[env_key]
-            try:
-                if isinstance(default_val, bool):
-                    return raw_val.lower() in ('true', '1', 'yes', 'on')
-                if isinstance(default_val, int):
-                    return int(raw_val)
-                if isinstance(default_val, float):
-                    return float(raw_val)
-                return raw_val
-            except ValueError:
-                return default_val
-
-        if key in self._file_config:
-            return self._file_config[key]
-
-        return default_val
-
-    def export_defaults(self) -> None:
+    def __get__(self, instance: Any, owner: Any) -> T:
+        """Retrieve and cast value from environment or internal cache."""
+        if instance is None:
+            return self.default
+        raw_val = instance._data.get(self.key, os.getenv(self.key.upper(), self.default))
         try:
-            with open(self._filepath, 'w', encoding='utf-8') as f:
-                json.dump(self._defaults, f, indent=4)
-        except OSError as e:
-            raise IOError(f"Could not write default configuration template: {e}")
+            return self.cast(raw_val) if raw_val != self.default else self.default
+        except (ValueError, TypeError):
+            return self.default
+
+
+class DynamicConfig:
+    """Config registry utilizing bitwise OR syntax for merging instances."""
+
+    verbose: ConfigValue[bool] = ConfigValue("verbose", False, lambda x: str(x).lower() in ("true", "1", "yes"))
+    max_retries: ConfigValue[int] = ConfigValue("max_retries", 3, int)
+    output_format: ConfigValue[str] = ConfigValue("output_format", "json", str)
+
+    def __init__(self, initial_data: Optional[Dict[str, Any]] = None) -> None:
+        """Initialize config instance with dictionary payload."""
+        self._data: Dict[str, Any] = initial_data or {}
+
+    def __or__(self, other: Union["DynamicConfig", Dict[str, Any]]) -> "DynamicConfig":
+        """Merge two config instances or a dict using the bitwise OR operator."""
+        merged = self._data.copy()
+        if isinstance(other, DynamicConfig):
+            merged.update(other._data)
+        elif isinstance(other, dict):
+            merged.update(other)
+        return DynamicConfig(merged)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Export active config options into dictionary form."""
+        return {
+            "verbose": self.verbose,
+            "max_retries": self.max_retries,
+            "output_format": self.output_format,
+        }
