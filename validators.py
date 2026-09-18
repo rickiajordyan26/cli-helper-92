@@ -1,34 +1,43 @@
-import functools
-import time
+import re
+from typing import Any, Callable
 
-_memoized_cache = {}
+class Rule:
+    def __init__(self, check: Callable[[Any], bool], error_msg: str):
+        self.check = check
+        self.error_msg = error_msg
 
-def lru_cache_with_ttl(ttl_seconds=60):
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = (func.__name__, args, frozenset(kwargs.items()))
-            now = time.time()
-            if key in _memoized_cache:
-                result, timestamp = _memoized_cache[key]
-                if now - timestamp < ttl_seconds:
-                    return result
-            result = func(*args, **kwargs)
-            _memoized_cache[key] = (result, now)
-            return result
-        return wrapper
-    return decorator
+    def __and__(self, other: "Rule") -> "Rule":
+        return Rule(
+            lambda x: self.check(x) and other.check(x),
+            f"{self.error_msg} AND {other.error_msg}"
+        )
 
-@lru_cache_with_ttl(ttl_seconds=300)
-def validate_input_schema(data_packet):
-    if not isinstance(data_packet, dict):
-        return False
-    return all(isinstance(k, str) for k in data_packet.keys())
+    def __or__(self, other: "Rule") -> "Rule":
+        return Rule(
+            lambda x: self.check(x) or other.check(x),
+            f"({self.error_msg} OR {other.error_msg})"
+        )
 
-def bulk_validate(data_list):
-    # Vectorized-style evaluation for heavy processing modules
-    results = map(validate_input_schema, data_list)
-    return list(results)
+    def validate(self, value: Any) -> bool:
+        if not self.check(value):
+            raise ValueError(f"Validation failed for '{value}': {self.error_msg}")
+        return True
 
-def flush_cache():
-    _memoized_cache.clear()
+def is_alphanumeric_or_dash(value: str) -> bool:
+    return bool(re.match(r"^[a-zA-Z0-9_-]+$", str(value)))
+
+def has_min_length(length: int) -> Callable[[Any], bool]:
+    return lambda x: len(str(x)) >= length
+
+cli_arg_rule = Rule(
+    lambda x: isinstance(x, str), "must be a string"
+) & Rule(is_alphanumeric_or_dash, "must be alphanumeric, dash, or underscore")
+
+port_rule = Rule(
+    lambda x: str(x).isdigit(), "must be a numeric representation"
+) & Rule(lambda x: 1 <= int(x) <= 65535, "must be a valid port (1-65535)")
+
+semver_rule = Rule(
+    lambda x: bool(re.match(r"^\d+\.\d+\.\d+$", str(x))),
+    "must match major.minor.patch version format"
+)
