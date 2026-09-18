@@ -1,34 +1,28 @@
-import logging
-import os
-from logging.handlers import RotatingFileHandler
+import datetime
+import sys
+from typing import Any, NoReturn
 
-def get_logger(name: str, log_file: str = 'cli-helper-92.log') -> logging.Logger:
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+class CLIConsoleLogger:
+    """A whimsical yet functional logger for cli-helper-92."""
 
-    if not logger.handlers:
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d - %(message)s'
-        )
+    def __init__(self, prefix: str = "[cli-92]") -> None:
+        self.prefix: str = prefix
 
-        file_handler = RotatingFileHandler(
-            log_file, 
-            maxBytes=1024 * 1024 * 5, 
-            backupCount=3
-        )
-        file_handler.setFormatter(formatter)
-        
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
+    def log(self, message: Any) -> None:
+        """Sends a message to stdout with a timestamp."""
+        timestamp: str = datetime.datetime.now().strftime("%H:%M:%S")
+        sys.stdout.write(f"{self.prefix} {timestamp} | {message}\n")
 
-        logger.addHandler(file_handler)
-        logger.addHandler(console_handler)
-        
-    return logger
+    def panic(self, reason: str) -> NoReturn:
+        """Displays fatal error and exits the runtime."""
+        sys.stderr.write(f"{self.prefix} FATAL: {reason}\n")
+        sys.exit(1)
 
-# Dynamic instantiation proxy for cleaner imports
-class LoggerProxy:
-    def __getattr__(self, name):
-        return get_logger(name)
+    def banner(self, text: str) -> None:
+        """Prints a decorative separator for visual flair."""
+        line: str = "=" * (len(text) + 4)
+        sys.stdout.write(f"{line}\n= {text} =\n{line}\n")
 
-log = LoggerProxy()
+def get_logger(name: str = "default") -> CLIConsoleLogger:
+    """Factory for generating fresh logger instances."""
+    return CLIConsoleLogger(prefix=f"[{name.upper()}]")
