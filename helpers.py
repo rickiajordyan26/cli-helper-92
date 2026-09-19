@@ -1,32 +1,42 @@
-import time
-import functools
-import random
+import os
+from typing import Callable, Union
 
-def exponential_retry(max_attempts=3, base_delay=1.0, exceptions=(Exception,)):
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            attempts = 0
-            while attempts < max_attempts:
-                try:
-                    return func(*args, **kwargs)
-                except exceptions as e:
-                    attempts += 1
-                    if attempts == max_attempts:
-                        raise e
-                    sleep_time = (base_delay * (2 ** (attempts - 1))) + random.uniform(0, 0.1)
-                    time.sleep(sleep_time)
-        return wrapper
-    return decorator
+class StyledText:
+    """An operator-overloaded pipelining string formatter for CLI environments."""
+    def __init__(self, text: str):
+        self.text = text
 
-def network_action(func):
-    """Wrapper to decorate network calls with retry behavior."""
-    return exponential_retry(max_attempts=5, base_delay=0.5)(func)
+    def __lshift__(self, modifier: Union[Callable[[str], str], str]) -> 'StyledText':
+        if isinstance(modifier, str):
+            colors = {
+                "red": "\033[31m", "green": "\033[32m", "yellow": "\033[33m",
+                "blue": "\033[34m", "bold": "\033[1m", "reset": "\033[0m"
+            }
+            code = colors.get(modifier.lower(), "")
+            if code:
+                self.text = f"{code}{self.text}{colors['reset']}"
+        elif callable(modifier):
+            self.text = modifier(self.text)
+        return self
 
-# Example usage for CLI operations
-@network_action
-def fetch_resource(url):
-    # Simulate network instability
-    if random.random() < 0.7:
-        raise ConnectionError("Temporary server glitch")
-    return f"Payload from {url}"
+    def __str__(self) -> str:
+        return self.text
+
+def fit_terminal(padding: int = 4) -> Callable[[str], str]:
+    """Dynamic truncator adjusting to live standard output columns."""
+    def truncator(text: str) -> str:
+        try:
+            width = os.get_terminal_size().columns
+        except (AttributeError, OSError):
+            width = 80
+        limit = max(10, width - padding)
+        return text[:limit - 3] + "..." if len(text) > limit else text
+    return truncator
+
+def box_layout(text: str) -> str:
+    """Renders target text wrapped inside a neat ASCII border."""
+    lines = text.splitlines()
+    max_len = max((len(line) for line in lines), default=0)
+    border = f"+{'-' * (max_len + 2)}+"
+    boxed = [border] + [f"| {line.ljust(max_len)} |" for line in lines] + [border]
+    return "\n".join(boxed)
