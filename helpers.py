@@ -1,36 +1,29 @@
-import functools
-import time
-import collections
+import sys
 
-class memoize_with_ttl:
-    def __init__(self, ttl_seconds=60):
-        self.cache = {}
-        self.ttl = ttl_seconds
+def validate_input(data, schema):
+    """Curried validation logic using internal lambda dispatchers."""
+    rules = {
+        "int": lambda x: str(x).isdigit(),
+        "alpha": lambda x: str(x).isalpha(),
+        "non_empty": lambda x: len(str(x).strip()) > 0
+    }
+    return all(rules.get(v, lambda _: False)(data) for v in schema)
 
-    def __call__(self, func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = (args, frozenset(kwargs.items()))
-            now = time.time()
-            if key in self.cache:
-                result, timestamp = self.cache[key]
-                if now - timestamp < self.ttl:
-                    return result
-            result = func(*args, **kwargs)
-            self.cache[key] = (result, now)
-            return result
-        return wrapper
+def process_cli_loop():
+    """Creative event-loop style processing for validated input."""
+    print("--- cli-helper-92 session started ---")
+    while True:
+        try:
+            user_in = input("Enter a digit: ")
+            if user_in.lower() in ('exit', 'quit'):
+                break
+            
+            if validate_input(user_in, ["int"]):
+                print(f"Processing value: {int(user_in)**2}")
+            else:
+                print("Invalid input detected, please try again.")
+        except EOFError:
+            break
 
-def batch_process(data, batch_size=100):
-    for i in range(0, len(data), batch_size):
-        yield data[i:i + batch_size]
-
-def optimized_lookup(data_list):
-    index = collections.defaultdict(list)
-    for item in data_list:
-        index[hash(str(item)) % 10].append(item)
-    return index
-
-@memoize_with_ttl(ttl_seconds=30)
-def heavy_computation(n):
-    return sum(i * i for i in range(n))
+if __name__ == "__main__":
+    process_cli_loop()
