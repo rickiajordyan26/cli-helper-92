@@ -1,46 +1,36 @@
 import functools
-import sys
-import logging
+import time
+import collections
 
-logger = logging.getLogger('cli-helper-92')
-
-class ResilienceDecorator:
-    def __init__(self, retries=3, fallback=None):
-        self.retries = retries
-        self.fallback = fallback
+class memoize_with_ttl:
+    def __init__(self, ttl_seconds=60):
+        self.cache = {}
+        self.ttl = ttl_seconds
 
     def __call__(self, func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            attempts = 0
-            while attempts < self.retries:
-                try:
-                    return func(*args, **kwargs)
-                except (ConnectionError, TimeoutError) as e:
-                    attempts += 1
-                    logger.warning(f'attempt {attempts} failed: {e}')
-            
-            if self.fallback is not None:
-                return self.fallback()
-            
-            logger.error('critical failure after max retries')
-            sys.exit(1)
+            key = (args, frozenset(kwargs.items()))
+            now = time.time()
+            if key in self.cache:
+                result, timestamp = self.cache[key]
+                if now - timestamp < self.ttl:
+                    return result
+            result = func(*args, **kwargs)
+            self.cache[key] = (result, now)
+            return result
         return wrapper
 
-def sanitize_input(data):
-    if data is None:
-        return ""
-    if isinstance(data, (int, float)):
-        return str(data)
-    try:
-        return ''.join(c for c in str(data) if c.isprintable())
-    except Exception:
-        return "[corrupted_data]"
+def batch_process(data, batch_size=100):
+    for i in range(0, len(data), batch_size):
+        yield data[i:i + batch_size]
 
-def execute_with_guard(task, *args, **kwargs):
-    try:
-        return task(*args, **kwargs)
-    except KeyboardInterrupt:
-        sys.exit(0)
-    except Exception as e:
-        return {'error': True, 'msg': str(e), 'code': 500}
+def optimized_lookup(data_list):
+    index = collections.defaultdict(list)
+    for item in data_list:
+        index[hash(str(item)) % 10].append(item)
+    return index
+
+@memoize_with_ttl(ttl_seconds=30)
+def heavy_computation(n):
+    return sum(i * i for i in range(n))
