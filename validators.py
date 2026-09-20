@@ -1,43 +1,45 @@
 import re
-from typing import Any, Callable
+from typing import Callable, Generic, TypeVar
 
-class Rule:
-    def __init__(self, check: Callable[[Any], bool], error_msg: str):
-        self.check = check
-        self.error_msg = error_msg
+T = TypeVar("T")
 
-    def __and__(self, other: "Rule") -> "Rule":
-        return Rule(
-            lambda x: self.check(x) and other.check(x),
-            f"{self.error_msg} AND {other.error_msg}"
+
+class Validator(Generic[T]):
+    """A monadic-esque validation container enabling pipeline-based verification.
+
+    Supports chaining multiple conditions via the right-shift operator (>>).
+    """
+
+    def __init__(self, check: Callable[[T], bool], error_message: str) -> None:
+        self.check: Callable[[T], bool] = check
+        self.error_message: str = error_message
+
+    def __call__(self, value: T) -> bool:
+        """Performs validation of the given value, catching typical conversion errors."""
+        try:
+            return self.check(value)
+        except (ValueError, TypeError, AttributeError):
+            return False
+
+    def __rshift__(self, other: "Validator[T]") -> "Validator[T]":
+        """Chains this validator with another via AND logic (>> operator)."""
+        return Validator(
+            lambda val: self(val) and other(val),
+            f"{self.error_message} & {other.error_message}",
         )
 
-    def __or__(self, other: "Rule") -> "Rule":
-        return Rule(
-            lambda x: self.check(x) or other.check(x),
-            f"({self.error_msg} OR {other.error_msg})"
-        )
 
-    def validate(self, value: Any) -> bool:
-        if not self.check(value):
-            raise ValueError(f"Validation failed for '{value}': {self.error_msg}")
-        return True
+def matches_regex(pattern: str) -> Validator[str]:
+    """Generates a validator that matches string values against a regular expression."""
+    rx = re.compile(pattern)
+    return Validator(lambda s: bool(rx.match(s)), f"match pattern '{pattern}'")
 
-def is_alphanumeric_or_dash(value: str) -> bool:
-    return bool(re.match(r"^[a-zA-Z0-9_-]+$", str(value)))
 
-def has_min_length(length: int) -> Callable[[Any], bool]:
-    return lambda x: len(str(x)) >= length
+def has_min_length(limit: int) -> Validator[str]:
+    """Creates a validator to ensure a string contains at least N characters."""
+    return Validator(lambda s: len(s) >= limit, f"minimum length of {limit}")
 
-cli_arg_rule = Rule(
-    lambda x: isinstance(x, str), "must be a string"
-) & Rule(is_alphanumeric_or_dash, "must be alphanumeric, dash, or underscore")
 
-port_rule = Rule(
-    lambda x: str(x).isdigit(), "must be a numeric representation"
-) & Rule(lambda x: 1 <= int(x) <= 65535, "must be a valid port (1-65535)")
-
-semver_rule = Rule(
-    lambda x: bool(re.match(r"^\d+\.\d+\.\d+$", str(x))),
-    "must match major.minor.patch version format"
-)
+def is_numeric() -> Validator[str]:
+    """Creates a validator ensuring a string input can represent an integer."""
+    return Validator(lambda s: s.lstrip("-").isdigit(), "integer numeric format")
