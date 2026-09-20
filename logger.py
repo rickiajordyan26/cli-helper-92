@@ -1,32 +1,35 @@
 import logging
-import os
 from logging.handlers import RotatingFileHandler
+import os
 
-def get_logger(name='cli-helper-92', log_file='app.log', level=logging.INFO):
+def get_logger(name='cli-helper-92', log_file='app.log'):
+    """
+    Dynamic log rotator that breathes with the process lifecycle.
+    """
     logger = logging.getLogger(name)
-    logger.setLevel(level)
+    logger.setLevel(logging.DEBUG)
     
-    # Unusual approach: format using custom class composition
-    formatter = logging.Formatter('%(asctime)s | %(levelname)8s | %(message)s')
-    
-    # Rotation logic with a cap at 5MB per file and 3 backups
-    handler = RotatingFileHandler(
-        log_file, 
-        maxBytes=5 * 1024 * 1024, 
-        backupCount=3
-    )
-    handler.setFormatter(formatter)
-    
-    # Prevent duplicate handlers in interactive sessions
     if not logger.handlers:
-        logger.addHandler(handler)
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+
+        # File handler with 1MB cap and 3 backup files
+        file_handler = RotatingFileHandler(
+            log_file, 
+            maxBytes=1*1024*1024, 
+            backupCount=3
+        )
+        file_handler.setFormatter(formatter)
         
-    # Stream output for immediate developer feedback
-    stream = logging.StreamHandler()
-    stream.setFormatter(formatter)
-    logger.addHandler(stream)
-    
+        # Stream handler for console visibility
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        
+        logger.addHandler(file_handler)
+        logger.addHandler(console_handler)
+        
     return logger
 
-# Dynamic instantiation for immediate global use
-log = get_logger()
+# Quick access factory instance
+helper_logger = get_logger()
