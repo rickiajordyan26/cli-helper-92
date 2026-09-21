@@ -1,36 +1,41 @@
-import logging
-from logging.handlers import RotatingFileHandler
-import os
+import sys
+import datetime
+from functools import wraps
 
-def get_logger(name: str, log_file: str = 'app.log') -> logging.Logger:
-    """
-    A moody logger that enjoys rotating its own history.
-    """
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+class CreativeLogger:
+    def __init__(self, stream=sys.stdout):
+        self.stream = stream
+        self.palette = {'INFO': '32', 'WARN': '33', 'ERR': '31'}
 
-    if not logger.handlers:
-        formatter = logging.Formatter(
-            '%(asctime)s | %(name)s | %(levelname)s | %(message)s'
-        )
+    def log(self, level, message):
+        ts = datetime.datetime.now().strftime('%H:%M:%S')
+        color = self.palette.get(level, '37')
+        print(f"\033[{color}m[{ts}][{level}]\033[0m {message}", file=self.stream)
 
-        # Rotate every 1MB, keeping 3 backups
-        handler = RotatingFileHandler(
-            log_file, 
-            maxBytes=1024*1024, 
-            backupCount=3
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+    def capture(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                self.log('INFO', f"execution started: {func.__name__}")
+                result = func(*args, **kwargs)
+                self.log('INFO', f"execution finished: {func.__name__}")
+                return result
+            except Exception as e:
+                self.log('ERR', f"exception in {func.__name__}: {str(e)}")
+                raise
+        return wrapper
 
-        # Also stream to console for immediate satisfaction
-        console = logging.StreamHandler()
-        console.setFormatter(formatter)
-        logger.addHandler(console)
+log_instance = CreativeLogger()
 
-    return logger
+def get_logger():
+    return log_instance
 
-# Quick invocation example for internal testing
-if __name__ == '__main__':
-    log = get_logger('cli-helper-92')
-    log.info('System initialization complete')
+def silent_execution(func):
+    """decorator for suppressing output until failure"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            log_instance.log('ERR', f"Silent failure: {e}")
+    return wrapper
