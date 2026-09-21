@@ -1,23 +1,25 @@
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 # cli-helper-92
 
-`cli-helper-92` is a lightweight Python utility designed to streamline common terminal tasks and automate repetitive command-line workflows. It provides a robust interface for managing system processes and configuration files without the overhead of heavy framework dependencies.
+`cli-helper-92` is a lightweight Python toolkit designed to simplify building robust, interactive command-line interfaces with minimal boilerplate. It combines seamless argument parsing, styled terminal output, and automated configuration management into a single developer-friendly package.
 
 ## Features
 
-*   **Process Orchestrator:** Effortlessly spawn, monitor, and terminate background sub-processes with real-time logging.
-*   **Dynamic Config Parser:** Automatic detection and synchronization of local `.yaml` and `.json` configuration files into Python objects.
-*   **Interactive Prompts:** Built-in boilerplate for CLI menus, spinners, and progress bars to enhance user experience.
-*   **Cross-Platform Path Handling:** Native abstraction layer for filesystem operations ensuring compatibility across Linux, macOS, and Windows.
+* **Decorator-Based Command Routing:** Register commands, options, and type-checked arguments effortlessly using clean Python decorators.
+* **Rich Terminal Outputs:** Built-in support for ANSI colors, status spinners, formatted tables, and progress bars without extra dependencies.
+* **Auto-Persisted Configs:** Automatically generate, load, and save user settings in JSON or YAML formats across runtime sessions.
+* **Interactive User Input:** Prompt users for text, confirmation toggles, and masked passwords with native validation rules.
 
 ## Installation
 
-Ensure you have Python 3.8 or higher installed. Install the package via pip:
+Install the package directly from PyPI using `pip`:
 
 ```bash
 pip install cli-helper-92
 ```
 
-To install from source for development:
+Or install the development version locally:
 
 ```bash
 git clone https://github.com/Developer/cli-helper-92.git
@@ -25,26 +27,37 @@ cd cli-helper-92
 pip install -e .
 ```
 
-## Basic Usage
+## Quick Start
 
-Import the `TaskRunner` to handle execution chains or use the `ConfigLoader` to manage your app settings:
+Create a file named `app.py`:
 
 ```python
-from cli_helper_92 import TaskRunner, ConfigLoader
+from cli_helper_92 import CLI, style
 
-# Load your configuration
-config = ConfigLoader.load("settings.yaml")
+app = CLI(name="demo", description="Quick start example using cli-helper-92")
 
-# Execute a system command with progress tracking
-runner = TaskRunner()
-runner.run("echo 'Hello, World!'")
+@app.command()
+def deploy(environment: str, verbose: bool = False):
+    """Deploy the project to a specified environment."""
+    if verbose:
+        app.log("Preparing build context...", level="debug")
+    
+    app.spinner_start("Deploying build artifacts...")
+    # Perform deployment tasks here
+    app.spinner_stop()
+    
+    print(style.success(f"Successfully deployed to {environment}!"))
 
-# Access config values directly
-print(f"Loaded environment: {config.get('env')}")
+if __name__ == "__main__":
+    app.run()
+```
+
+Run your command directly from the terminal:
+
+```bash
+python app.py deploy production --verbose
 ```
 
 ## License
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-Distributed under the MIT License. See `LICENSE` for more information.
+This project is licensed under the MIT License - see the `LICENSE` file for details.
