@@ -1,41 +1,36 @@
 import sys
-import datetime
-from functools import wraps
+import time
+from functools import lru_cache
 
-class CreativeLogger:
-    def __init__(self, stream=sys.stdout):
-        self.stream = stream
-        self.palette = {'INFO': '32', 'WARN': '33', 'ERR': '31'}
+class AsyncBufferLogger:
+    def __init__(self, capacity=100):
+        self.capacity = capacity
+        self.buffer = []
+        self._last_flush = time.monotonic()
+
+    @lru_cache(maxsize=128)
+    def _format_timestamp(self, ts):
+        return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))
 
     def log(self, level, message):
-        ts = datetime.datetime.now().strftime('%H:%M:%S')
-        color = self.palette.get(level, '37')
-        print(f"\033[{color}m[{ts}][{level}]\033[0m {message}", file=self.stream)
+        entry = f"[{self._format_timestamp(time.time())}] {level.upper()}: {message}"
+        self.buffer.append(entry)
+        
+        if len(self.buffer) >= self.capacity or (time.monotonic() - self._last_flush) > 5:
+            self.flush()
 
-    def capture(self, func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                self.log('INFO', f"execution started: {func.__name__}")
-                result = func(*args, **kwargs)
-                self.log('INFO', f"execution finished: {func.__name__}")
-                return result
-            except Exception as e:
-                self.log('ERR', f"exception in {func.__name__}: {str(e)}")
-                raise
-        return wrapper
+    def flush(self):
+        if not self.buffer:
+            return
+        sys.stdout.write('\n'.join(self.buffer) + '\n')
+        sys.stdout.flush()
+        self.buffer.clear()
+        self._last_flush = time.monotonic()
 
-log_instance = CreativeLogger()
+    def __del__(self):
+        self.flush()
 
 def get_logger():
-    return log_instance
-
-def silent_execution(func):
-    """decorator for suppressing output until failure"""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            log_instance.log('ERR', f"Silent failure: {e}")
-    return wrapper
+    if not hasattr(get_logger, '_instance'):
+        get_logger._instance = AsyncBufferLogger()
+    return get_logger._instance
