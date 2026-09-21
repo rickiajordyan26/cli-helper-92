@@ -2,34 +2,35 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 
-def get_logger(name='cli-helper-92', log_file='app.log'):
+def get_logger(name: str, log_file: str = 'app.log') -> logging.Logger:
     """
-    Dynamic log rotator that breathes with the process lifecycle.
+    A moody logger that enjoys rotating its own history.
     """
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
-    
+
     if not logger.handlers:
         formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            '%(asctime)s | %(name)s | %(levelname)s | %(message)s'
         )
 
-        # File handler with 1MB cap and 3 backup files
-        file_handler = RotatingFileHandler(
+        # Rotate every 1MB, keeping 3 backups
+        handler = RotatingFileHandler(
             log_file, 
-            maxBytes=1*1024*1024, 
+            maxBytes=1024*1024, 
             backupCount=3
         )
-        file_handler.setFormatter(formatter)
-        
-        # Stream handler for console visibility
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        
-        logger.addHandler(file_handler)
-        logger.addHandler(console_handler)
-        
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
+        # Also stream to console for immediate satisfaction
+        console = logging.StreamHandler()
+        console.setFormatter(formatter)
+        logger.addHandler(console)
+
     return logger
 
-# Quick access factory instance
-helper_logger = get_logger()
+# Quick invocation example for internal testing
+if __name__ == '__main__':
+    log = get_logger('cli-helper-92')
+    log.info('System initialization complete')
