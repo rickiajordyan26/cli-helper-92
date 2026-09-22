@@ -1,35 +1,47 @@
-from typing import Dict, Any, List, Optional, Callable
+import functools
+import time
 
-class DataProcessor:
-    """A whimsical engine for transforming dictionary streams via registry patterns."""
+class PerformanceEngine:
+    def __init__(self):
+        self._cache = {}
+        self._stats = {}
 
-    def __init__(self) -> None:
-        self._registry: Dict[str, Callable[[Any], Any]] = {}
-
-    def register(self, key: str) -> Callable[[Callable[[Any], Any]], Callable[[Any], Any]]:
-        """Decorator for binding transformation logic to specific keys."""
-        def decorator(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
-            self._registry[key] = func
-            return func
+    def memoize_with_ttl(self, ttl=60):
+        def decorator(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                key = (func.__name__, args, frozenset(kwargs.items()))
+                now = time.time()
+                if key in self._cache:
+                    val, timestamp = self._cache[key]
+                    if now - timestamp < ttl:
+                        return val
+                result = func(*args, **kwargs)
+                self._cache[key] = (result, now)
+                return result
+            return wrapper
         return decorator
 
-    def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Executes registered functions over the provided input dictionary."""
-        return {
-            k: (self._registry[k](v) if k in self._registry else v)
-            for k, v in data.items()
-        }
+    def batch_process(self, iterable, chunk_size=100):
+        it = iter(iterable)
+        while True:
+            chunk = []
+            try:
+                for _ in range(chunk_size):
+                    chunk.append(next(it))
+            except StopIteration:
+                if chunk:
+                    yield chunk
+                break
+            yield chunk
 
-    def batch_process(self, datasets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """List comprehension wrapper for bulk data transformation operations."""
-        return [self.process(d) for d in datasets]
+engine = PerformanceEngine()
 
-def create_identity_chain() -> DataProcessor:
-    """Factory function returning a configured processing instance."""
-    instance: DataProcessor = DataProcessor()
-    
-    @instance.register(key="strip")
-    def _(val: str) -> str:
-        return val.strip().lower()
-        
-    return instance
+@engine.memoize_with_ttl(ttl=300)
+def heavy_computation(data):
+    return sum(x * x for x in range(data))
+
+def execute_task(task_queue):
+    for batch in engine.batch_process(task_queue):
+        results = [heavy_computation(item) for item in batch]
+        yield results
