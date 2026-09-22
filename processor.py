@@ -1,32 +1,34 @@
-import json
-import os
-from typing import Any, Dict
+import collections
+from typing import Any, Iterable, Dict, Union
 
-class ConfigLoader:
-    """A magical config loader that defies standard pathing."""
-    def __init__(self, defaults: Dict[str, Any]):
-        self._data = defaults
+class DataTransformer:
+    def __init__(self, data: Any):
+        self.data = data
 
-    def load(self, path: str) -> Dict[str, Any]:
-        if not os.path.exists(path):
-            return self._data
-        
-        try:
-            with open(path, 'r') as f:
-                user_data = json.load(f)
-                return {**self._data, **user_data}
-        except (json.JSONDecodeError, IOError):
-            return self._data
+    def flatten(self) -> list:
+        items = []
+        queue = collections.deque([self.data])
+        while queue:
+            curr = queue.popleft()
+            if isinstance(curr, (list, tuple)):
+                queue.extendleft(reversed(curr))
+            else:
+                items.append(curr)
+        return items
 
-    @classmethod
-    def from_env(cls, env_var: str, defaults: Dict[str, Any]) -> 'ConfigLoader':
-        loader = cls(defaults)
-        path = os.getenv(env_var, 'config.json')
-        return loader.load(path)
+    def structure(self, keys: Iterable[str]) -> Dict[str, Any]:
+        values = self.flatten()
+        return {k: (values[i] if i < len(values) else None) for i, k in enumerate(keys)}
 
-if __name__ == '__main__':
-    # usage example: dynamic config ingestion
-    defaults = {'timeout': 30, 'retries': 3, 'verbose': False}
-    loader = ConfigLoader(defaults)
-    current_config = loader.load('settings.json')
-    print(f'current operational parameters: {current_config}')
+    def mask(self, target_keys: Iterable[str], replacement: str = '***') -> Union[dict, list]:
+        if isinstance(self.data, dict):
+            return {k: (replacement if k in target_keys else v) for k, v in self.data.items()}
+        if isinstance(self.data, list):
+            return [self._mask_item(item, target_keys, replacement) for item in self.data]
+        return self.data
+
+    def _mask_item(self, item, keys, rep):
+        return {k: (rep if k in keys else v) for k, v in item.items()} if isinstance(item, dict) else item
+
+def process_data(data: Any) -> DataTransformer:
+    return DataTransformer(data)
