@@ -1,29 +1,46 @@
-import sys
+import functools
+import time
+import collections
 
-def validate_input(data, schema):
-    """Curried validation logic using internal lambda dispatchers."""
-    rules = {
-        "int": lambda x: str(x).isdigit(),
-        "alpha": lambda x: str(x).isalpha(),
-        "non_empty": lambda x: len(str(x).strip()) > 0
-    }
-    return all(rules.get(v, lambda _: False)(data) for v in schema)
+class MemoizeWithTTL:
+    def __init__(self, ttl=60):
+        self.ttl = ttl
+        self.cache = {}
+        self.expires = {}
 
-def process_cli_loop():
-    """Creative event-loop style processing for validated input."""
-    print("--- cli-helper-92 session started ---")
-    while True:
-        try:
-            user_in = input("Enter a digit: ")
-            if user_in.lower() in ('exit', 'quit'):
-                break
-            
-            if validate_input(user_in, ["int"]):
-                print(f"Processing value: {int(user_in)**2}")
-            else:
-                print("Invalid input detected, please try again.")
-        except EOFError:
-            break
+    def __call__(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            key = (args, tuple(sorted(kwargs.items())))
+            now = time.time()
+            if key in self.cache and now < self.expires.get(key, 0):
+                return self.cache[key]
+            result = func(*args, **kwargs)
+            self.cache[key] = result
+            self.expires[key] = now + self.ttl
+            return result
+        return wrapper
 
-if __name__ == "__main__":
-    process_cli_loop()
+class FastProcessor:
+    def __init__(self, limit=1000):
+        self.buffer = collections.deque(maxlen=limit)
+
+    def batch_process(self, data, func):
+        results = []
+        for item in data:
+            if item in self.buffer:
+                results.append(self.buffer[self.buffer.index(item)])
+                continue
+            res = func(item)
+            self.buffer.append(res)
+            results.append(res)
+        return results
+
+@MemoizeWithTTL(ttl=300)
+def expensive_transformation(value):
+    time.sleep(0.5)
+    return value * 2
+
+def get_optimized_data(items):
+    processor = FastProcessor()
+    return processor.batch_process(items, expensive_transformation)
