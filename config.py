@@ -1,55 +1,33 @@
-"""Dynamic configuration cascade engine for CLI options."""
-
+import json
 import os
-from typing import Any, TypeVar, Callable, Generic, Dict, Optional, Union
+from typing import Any, Dict
 
-T = TypeVar("T")
+class ConfigLoader:
+    def __init__(self, path: str, defaults: Dict[str, Any]):
+        self.path = path
+        self.defaults = defaults
+        self.data = self._load()
 
-
-class ConfigValue(Generic[T]):
-    """Descriptor resolving dynamic configuration values with type casting."""
-
-    def __init__(self, key: str, default: T, cast: Optional[Callable[[Any], T]] = None) -> None:
-        """Initialize a typed configuration key descriptor."""
-        self.key = key
-        self.default = default
-        self.cast = cast or (lambda x: type(default)(x))
-
-    def __get__(self, instance: Any, owner: Any) -> T:
-        """Retrieve and cast value from environment or internal cache."""
-        if instance is None:
-            return self.default
-        raw_val = instance._data.get(self.key, os.getenv(self.key.upper(), self.default))
+    def _load(self) -> Dict[str, Any]:
+        if not os.path.exists(self.path):
+            self._save(self.defaults)
+            return self.defaults
         try:
-            return self.cast(raw_val) if raw_val != self.default else self.default
-        except (ValueError, TypeError):
-            return self.default
+            with open(self.path, 'r') as f:
+                loaded = json.load(f)
+                return {**self.defaults, **loaded}
+        except (json.JSONDecodeError, IOError):
+            return self.defaults
 
+    def _save(self, data: Dict[str, Any]) -> None:
+        with open(self.path, 'w') as f:
+            json.dump(data, f, indent=4)
 
-class DynamicConfig:
-    """Config registry utilizing bitwise OR syntax for merging instances."""
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.data.get(key, default)
 
-    verbose: ConfigValue[bool] = ConfigValue("verbose", False, lambda x: str(x).lower() in ("true", "1", "yes"))
-    max_retries: ConfigValue[int] = ConfigValue("max_retries", 3, int)
-    output_format: ConfigValue[str] = ConfigValue("output_format", "json", str)
+    def __getitem__(self, key: str) -> Any:
+        return self.data[key]
 
-    def __init__(self, initial_data: Optional[Dict[str, Any]] = None) -> None:
-        """Initialize config instance with dictionary payload."""
-        self._data: Dict[str, Any] = initial_data or {}
-
-    def __or__(self, other: Union["DynamicConfig", Dict[str, Any]]) -> "DynamicConfig":
-        """Merge two config instances or a dict using the bitwise OR operator."""
-        merged = self._data.copy()
-        if isinstance(other, DynamicConfig):
-            merged.update(other._data)
-        elif isinstance(other, dict):
-            merged.update(other)
-        return DynamicConfig(merged)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Export active config options into dictionary form."""
-        return {
-            "verbose": self.verbose,
-            "max_retries": self.max_retries,
-            "output_format": self.output_format,
-        }
+def load_config(path: str = 'config.json', **defaults) -> ConfigLoader:
+    return ConfigLoader(path, defaults)
