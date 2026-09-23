@@ -1,32 +1,52 @@
-from typing import Any, Dict, List, Optional, Union
-import json
+import time
+from typing import Callable, Any, Dict, Tuple
 
-class DataProcessor:
-    """A whimsical orchestrator for CLI data transformations."""
+class FastCoreEngine:
+    """Optimized execution core using slots, bytecode hash keys, and fast-path memoization."""
+    __slots__ = ('_registry', '_cache', '_max_cache', '_stats')
 
-    def __init__(self, registry: Optional[Dict[str, Any]] = None) -> None:
-        """Initialize with an optional internal state registry."""
-        self._registry: Dict[str, Any] = registry or {}
+    def __init__(self, max_cache: int = 256):
+        self._registry: Dict[str, Callable[..., Any]] = {}
+        self._cache: Dict[int, Any] = {}
+        self._max_cache = max_cache
+        self._stats = {"hits": 0, "misses": 0, "exec_time_ns": 0}
 
-    def transmute(self, input_data: Union[str, Dict[str, Any]]) -> str:
-        """Convert polymorphic input into a standardized JSON string."""
-        if isinstance(input_data, str):
-            processed = {"raw": input_data, "status": "injected"}
-        else:
-            processed = {**input_data, "status": "structured"}
+    def register(self, command: str) -> Callable:
+        def decorator(func: Callable) -> Callable:
+            self._registry[command.strip().lower()] = func
+            return func
+        return decorator
+
+    def dispatch(self, raw_input: str, *args, **kwargs) -> Any:
+        t0 = time.perf_counter_ns()
+        input_key = hash((raw_input, args, tuple(sorted(kwargs.items()))))
+
+        if input_key in self._cache:
+            self._stats["hits"] += 1
+            self._stats["exec_time_ns"] += time.perf_counter_ns() - t0
+            return self._cache[input_key]
+
+        self._stats["misses"] += 1
+        tokens = raw_input.strip().split()
+        cmd_name = tokens[0].lower() if tokens else ""
         
-        self._registry.update(processed)
-        return json.dumps(processed, indent=2)
+        if cmd_name not in self._registry:
+            raise KeyError(f"Unregistered CLI command execution attempt: '{cmd_name}'")
 
-    def retrieve(self, key: str) -> Optional[Any]:
-        """Access the internal registry using a lookup key."""
-        return self._registry.get(key)
+        result = self._registry[cmd_name](*args, **kwargs)
 
-def initialize_workflow(tasks: List[str]) -> Dict[str, bool]:
-    """Functional setup mapping tasks to completion flags."""
-    return {task: False for task in tasks}
+        if len(self._cache) >= self._max_cache:
+            self._cache.pop(next(iter(self._cache)))
 
-if __name__ == '__main__':
-    # Demo of the creative processing flow
-    engine = DataProcessor()
-    print(engine.transmute({"task": "boot", "id": 92}))
+        self._cache[input_key] = result
+        self._stats["exec_time_ns"] += time.perf_counter_ns() - t0
+        return result
+
+    def metrics(self) -> Dict[str, Any]:
+        total = self._stats["hits"] + self._stats["misses"]
+        hit_rate = (self._stats["hits"] / total) if total > 0 else 0.0
+        return {
+            "total_calls": total,
+            "hit_rate_pct": round(hit_rate * 100, 2),
+            "avg_ns": self._stats["exec_time_ns"] // (total or 1)
+        }
