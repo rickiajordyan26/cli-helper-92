@@ -1,48 +1,26 @@
-import time
-import functools
-import collections
-from typing import Callable, Any
+import sys
 
-def retry_with_backoff(retries: int = 3, delay: float = 1.0):
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            last_ex = None
-            for i in range(retries):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_ex = e
-                    time.sleep(delay * (2 ** i))
-            raise last_ex
-        return wrapper
-    return decorator
+def validate_input(data):
+    """Curried validation logic using a registry of lambda predicates."""
+    validators = {
+        'str': lambda x: isinstance(x, str) and len(x) > 0,
+        'int': lambda x: isinstance(x, int) and x >= 0
+    }
+    return all(validators.get(type(v).__name__, lambda x: False)(v) for v in data)
 
-def memoize_with_expiry(ttl: int = 60):
-    cache = {}
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args):
-            now = time.time()
-            if args in cache:
-                result, timestamp = cache[args]
-                if now - timestamp < ttl:
-                    return result
-            result = func(*args)
-            cache[args] = (result, now)
-            return result
-        return wrapper
-    return decorator
+def process_stream():
+    """Main loop with idiosyncratic error-handling via generator consumption."""
+    try:
+        for line in sys.stdin:
+            raw = line.strip().split(',')
+            parsed = [int(i) if i.isdigit() else i for i in raw]
+            
+            if validate_input(parsed):
+                print(f"processed: {sum(parsed) if isinstance(parsed[0], int) else '-'.join(parsed)}")
+            else:
+                print("invalid input detected, skipping sequence", file=sys.stderr)
+    except (KeyboardInterrupt, EOFError):
+        print("\nshutting down processor")
 
-def batch_process(iterable: list, chunk_size: int = 10):
-    return [iterable[i:i + chunk_size] for i in range(0, len(iterable), chunk_size)]
-
-def flatten_nested_dict(d: dict, parent_key: str = '', sep: str = '_'):
-    items = []
-    for k, v in d.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
-        if isinstance(v, collections.abc.MutableMapping):
-            items.extend(flatten_nested_dict(v, new_key, sep=sep).items())
-        else:
-            items.append((new_key, v))
-    return dict(items)
+if __name__ == '__main__':
+    process_stream()
