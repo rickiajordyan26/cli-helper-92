@@ -1,30 +1,33 @@
+import json
 import os
-from typing import Dict, Any, Optional
+from typing import Any, Dict
 
 class ConfigLoader:
-    """Handles environment-based configuration for cli-helper-92."""
+    def __init__(self, defaults: Dict[str, Any], path: str = 'config.json'):
+        self.path = path
+        self.data = defaults
+        self.load()
 
-    def __init__(self, prefix: str = "CLI_92_") -> None:
-        self.prefix: str = prefix
-        self._cache: Dict[str, Any] = {}
+    def load(self) -> None:
+        if os.path.exists(self.path):
+            try:
+                with open(self.path, 'r') as f:
+                    self.data.update(json.load(f))
+            except (json.JSONDecodeError, IOError):
+                pass
 
-    def fetch(self, key: str, default: Optional[Any] = None) -> Any:
-        """Retrieve config value with environment override logic."""
-        env_var: str = f"{self.prefix}{key.upper()}"
-        return os.getenv(env_var, self._cache.get(key, default))
+    def __getattr__(self, name: str) -> Any:
+        return self.data.get(name)
 
-    def update_cache(self, mapping: Dict[str, Any]) -> None:
-        """Inject external dictionary into configuration layer."""
-        self._cache.update(mapping)
+    def save(self, key: str, value: Any) -> None:
+        self.data[key] = value
+        with open(self.path, 'w') as f:
+            json.dump(self.data, f, indent=4)
 
-    def purge(self) -> None:
-        """Clear internal volatile configuration storage."""
-        self._cache = {}
+def get_config(defaults: Dict[str, Any]) -> ConfigLoader:
+    return ConfigLoader(defaults)
 
-def get_default_config() -> Dict[str, str]:
-    """Factory for base application settings."""
-    return {
-        "version": "0.9.2",
-        "mode": "development",
-        "path": os.getcwd()
-    }
+if __name__ == '__main__':
+    # usage example: dynamic config object with defaults
+    cfg = get_config({'timeout': 30, 'verbose': False})
+    print(f'current timeout: {cfg.timeout}')
