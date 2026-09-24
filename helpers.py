@@ -1,45 +1,34 @@
 import functools
-import sys
 import logging
+from typing import Callable, Any
 
 logger = logging.getLogger('cli-helper-92')
 
-class EdgeCaseHandler:
-    """Context manager/decorator for non-standard operational recovery."""
-    def __init__(self, recovery_map=None):
-        self.recovery_map = recovery_map or {}
+class EdgeCaseError(Exception):
+    """Custom exception for unpredictable CLI runtime states."""
+    pass
 
-    def __call__(self, func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                error_type = type(e)
-                if error_type in self.recovery_map:
-                    logger.warning(f"Triggering edge case recovery for {error_type.__name__}")
-                    return self.recovery_map[error_type](e)
-                raise e
-        return wrapper
-
-def silent_fallback(func):
-    """Swallow failures, return None, and log as debug output."""
+def robust_execution(func: Callable):
     @functools.wraps(func)
-    def inner(*args, **kwargs):
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
             return func(*args, **kwargs)
         except (ValueError, TypeError, KeyError) as e:
-            logger.debug(f"Silent failure on {func.__name__}: {e}")
+            logger.error(f"Data anomaly in {func.__name__}: {e}")
             return None
-    return inner
+        except Exception as e:
+            logger.critical(f"Unrecoverable chaos in {func.__name__}: {e}")
+            raise EdgeCaseError(f"Failed during {func.__name__}") from e
+    return wrapper
 
-def robust_map(data, transform_func):
-    """Process sequence, filtering errors into a secondary registry."""
-    results = []
-    errors = []
-    for item in data:
-        try:
-            results.append(transform_func(item))
-        except Exception as err:
-            errors.append({'item': item, 'reason': str(err)})
-    return results, errors
+def safe_dict_get(data: dict, key: str, default: Any = None) -> Any:
+    try:
+        return data.get(key, default) if data else default
+    except AttributeError:
+        logger.warning(f"Invalid object type passed to safe_get: {type(data)}")
+        return default
+
+def sanitize_input(value: Any) -> str:
+    if not isinstance(value, (str, int, float)):
+        return str(value or '')
+    return str(value).strip()
