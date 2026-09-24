@@ -1,29 +1,38 @@
-import time
 import functools
-import logging
+import time
+import json
+from typing import Callable, Any
 
-logger = logging.getLogger(__name__)
+def time_execution(func: Callable) -> Callable:
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        print(f"[DEBUG] {func.__name__} took {time.perf_counter() - start:.4f}s")
+        return result
+    return wrapper
 
-def retry_operation(attempts=3, delay=1.5, backoff=2):
-    def decorator(func):
+def safe_json_load(data: str, default: dict = None) -> dict:
+    try:
+        return json.loads(data)
+    except (json.JSONDecodeError, TypeError):
+        return default or {}
+
+def memoize_with_expiry(ttl: int = 60):
+    cache = {}
+    def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            current_delay = delay
-            for i in range(attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    if i == attempts - 1:
-                        logger.error(f"Final attempt failed: {e}")
-                        raise
-                    logger.warning(f"Attempt {i+1} failed, retrying in {current_delay}s...")
-                    time.sleep(current_delay)
-                    current_delay *= backoff
+        def wrapper(*args: Any) -> Any:
+            now = time.time()
+            if args in cache:
+                val, timestamp = cache[args]
+                if now - timestamp < ttl:
+                    return val
+            result = func(*args)
+            cache[args] = (result, now)
+            return result
         return wrapper
     return decorator
 
-@retry_operation(attempts=3)
-def fetch_url(url):
-    import urllib.request
-    with urllib.request.urlopen(url, timeout=5) as response:
-        return response.read().decode('utf-8')
+def chunk_list(data: list, size: int):
+    return [data[i:i + size] for i in range(0, len(data), size)]
