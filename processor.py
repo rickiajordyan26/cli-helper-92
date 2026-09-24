@@ -1,41 +1,53 @@
-import functools
-import logging
-from typing import Callable, Any
+import sys
+from typing import Callable, Generator
 
-logger = logging.getLogger('cli-helper-92')
+class Rule:
+    def __init__(self, predicate: Callable[[str], bool], error_msg: str):
+        self.predicate = predicate
+        self.error_msg = error_msg
 
-class ProcessingError(Exception):
-    """Custom exception for edge case failures."""
-    pass
+    def __and__(self, other: "Rule") -> "Rule":
+        return Rule(
+            lambda x: self.predicate(x) and other.predicate(x),
+            f"{self.error_msg} & {other.error_msg}"
+        )
 
-def robust_execution(func: Callable):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def validate(self, value: str) -> tuple[bool, str]:
+        is_valid = self.predicate(value)
+        return is_valid, "" if is_valid else self.error_msg
+
+is_not_empty = Rule(lambda s: bool(s and s.strip()), "input cannot be empty")
+is_alphanumeric = Rule(lambda s: s.strip().isalnum(), "must be alphanumeric")
+is_safe_length = Rule(lambda s: 3 <= len(s.strip()) <= 30, "length must be 3-30 chars")
+
+COMMAND_VALIDATOR = is_not_empty & is_alphanumeric & is_safe_length
+
+def process_stream(source: Generator[str, None, None]) -> None:
+    """Main processing loop using combined rule validators."""
+    print("=== CLI Helper 92 Interactive Processor ===")
+    print("Type 'exit' or 'quit' to terminate.")
+
+    for raw_input in source:
+        cleaned = raw_input.strip()
+        if cleaned.lower() in {"exit", "quit"}:
+            print("Shutting down processor.")
+            break
+
+        valid, err = COMMAND_VALIDATOR.validate(cleaned)
+        if not valid:
+            print(f"[REJECTED] {err}", file=sys.stderr)
+            continue
+
+        checksum = sum(ord(c) for c in cleaned) % 92
+        print(f"[PROCESSED] Command: '{cleaned}' | Token-ID: #92-{checksum:02d}")
+
+def stdin_generator() -> Generator[str, None, None]:
+    while True:
         try:
-            return func(*args, **kwargs)
-        except (ValueError, TypeError, KeyError) as e:
-            logger.error(f"Edge case hit in {func.__name__}: {e}")
-            return None
-        except Exception as e:
-            raise ProcessingError(f"Critical failure during {func.__name__}: {e}") from e
-    return wrapper
+            yield input("cli-helper> ")
+        except (KeyboardInterrupt, EOFError):
+            print("\nSession terminated.")
+            return
 
-class DataProcessor:
-    def __init__(self, registry: dict):
-        self.registry = registry
-
-    @robust_execution
-    def transform(self, key: str, modifier: Callable[[Any], Any]) -> Any:
-        if key not in self.registry:
-            raise KeyError(f"Key {key} missing from registry")
-        
-        raw_data = self.registry.get(key)
-        if raw_data is None:
-            raise ValueError("Null data encountered")
-            
-        return modifier(raw_data)
-
-def sanitize_input(data: Any) -> str:
-    if not isinstance(data, (str, int, float)):
-        raise TypeError("Invalid data type for sanitization")
-    return str(data).strip().lower()
+if __name__ == "__main__":
+    process_stream(stdin_generator())
