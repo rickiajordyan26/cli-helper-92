@@ -1,46 +1,45 @@
 import functools
-import time
-import collections
+import sys
+import logging
 
-class MemoizeWithTTL:
-    def __init__(self, ttl=60):
-        self.ttl = ttl
-        self.cache = {}
-        self.expires = {}
+logger = logging.getLogger('cli-helper-92')
+
+class EdgeCaseHandler:
+    """Context manager/decorator for non-standard operational recovery."""
+    def __init__(self, recovery_map=None):
+        self.recovery_map = recovery_map or {}
 
     def __call__(self, func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            key = (args, tuple(sorted(kwargs.items())))
-            now = time.time()
-            if key in self.cache and now < self.expires.get(key, 0):
-                return self.cache[key]
-            result = func(*args, **kwargs)
-            self.cache[key] = result
-            self.expires[key] = now + self.ttl
-            return result
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                error_type = type(e)
+                if error_type in self.recovery_map:
+                    logger.warning(f"Triggering edge case recovery for {error_type.__name__}")
+                    return self.recovery_map[error_type](e)
+                raise e
         return wrapper
 
-class FastProcessor:
-    def __init__(self, limit=1000):
-        self.buffer = collections.deque(maxlen=limit)
+def silent_fallback(func):
+    """Swallow failures, return None, and log as debug output."""
+    @functools.wraps(func)
+    def inner(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except (ValueError, TypeError, KeyError) as e:
+            logger.debug(f"Silent failure on {func.__name__}: {e}")
+            return None
+    return inner
 
-    def batch_process(self, data, func):
-        results = []
-        for item in data:
-            if item in self.buffer:
-                results.append(self.buffer[self.buffer.index(item)])
-                continue
-            res = func(item)
-            self.buffer.append(res)
-            results.append(res)
-        return results
-
-@MemoizeWithTTL(ttl=300)
-def expensive_transformation(value):
-    time.sleep(0.5)
-    return value * 2
-
-def get_optimized_data(items):
-    processor = FastProcessor()
-    return processor.batch_process(items, expensive_transformation)
+def robust_map(data, transform_func):
+    """Process sequence, filtering errors into a secondary registry."""
+    results = []
+    errors = []
+    for item in data:
+        try:
+            results.append(transform_func(item))
+        except Exception as err:
+            errors.append({'item': item, 'reason': str(err)})
+    return results, errors
