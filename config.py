@@ -1,30 +1,30 @@
-import json
 import os
-from typing import Any, Dict
+from typing import Dict, Any, Optional
 
 class ConfigLoader:
-    def __init__(self, path: str = 'config.json', defaults: Dict[str, Any] = None):
-        self.path = path
-        self.defaults = defaults or {}
-        self._data = self._load()
+    """Handles environment-based configuration for cli-helper-92."""
 
-    def _load(self) -> Dict[str, Any]:
-        if not os.path.exists(self.path):
-            return self.defaults.copy()
-        try:
-            with open(self.path, 'r') as f:
-                loaded = json.load(f)
-                return {**self.defaults, **loaded}
-        except (json.JSONDecodeError, IOError):
-            return self.defaults.copy()
+    def __init__(self, prefix: str = "CLI_92_") -> None:
+        self.prefix: str = prefix
+        self._cache: Dict[str, Any] = {}
 
-    def get(self, key: str, default: Any = None) -> Any:
-        return self._data.get(key, default)
+    def fetch(self, key: str, default: Optional[Any] = None) -> Any:
+        """Retrieve config value with environment override logic."""
+        env_var: str = f"{self.prefix}{key.upper()}"
+        return os.getenv(env_var, self._cache.get(key, default))
 
-    def __getattr__(self, name: str) -> Any:
-        if name in self._data:
-            return self._data[name]
-        raise AttributeError(f'Config has no attribute {name}')
+    def update_cache(self, mapping: Dict[str, Any]) -> None:
+        """Inject external dictionary into configuration layer."""
+        self._cache.update(mapping)
 
-def load_config(path: str, defaults: Dict[str, Any]) -> ConfigLoader:
-    return ConfigLoader(path, defaults)
+    def purge(self) -> None:
+        """Clear internal volatile configuration storage."""
+        self._cache = {}
+
+def get_default_config() -> Dict[str, str]:
+    """Factory for base application settings."""
+    return {
+        "version": "0.9.2",
+        "mode": "development",
+        "path": os.getcwd()
+    }
