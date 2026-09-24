@@ -1,34 +1,41 @@
-import collections
-from typing import Any, Iterable, Dict, Union
+import functools
+import logging
+from typing import Callable, Any
 
-class DataTransformer:
-    def __init__(self, data: Any):
-        self.data = data
+logger = logging.getLogger('cli-helper-92')
 
-    def flatten(self) -> list:
-        items = []
-        queue = collections.deque([self.data])
-        while queue:
-            curr = queue.popleft()
-            if isinstance(curr, (list, tuple)):
-                queue.extendleft(reversed(curr))
-            else:
-                items.append(curr)
-        return items
+class ProcessingError(Exception):
+    """Custom exception for edge case failures."""
+    pass
 
-    def structure(self, keys: Iterable[str]) -> Dict[str, Any]:
-        values = self.flatten()
-        return {k: (values[i] if i < len(values) else None) for i, k in enumerate(keys)}
+def robust_execution(func: Callable):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except (ValueError, TypeError, KeyError) as e:
+            logger.error(f"Edge case hit in {func.__name__}: {e}")
+            return None
+        except Exception as e:
+            raise ProcessingError(f"Critical failure during {func.__name__}: {e}") from e
+    return wrapper
 
-    def mask(self, target_keys: Iterable[str], replacement: str = '***') -> Union[dict, list]:
-        if isinstance(self.data, dict):
-            return {k: (replacement if k in target_keys else v) for k, v in self.data.items()}
-        if isinstance(self.data, list):
-            return [self._mask_item(item, target_keys, replacement) for item in self.data]
-        return self.data
+class DataProcessor:
+    def __init__(self, registry: dict):
+        self.registry = registry
 
-    def _mask_item(self, item, keys, rep):
-        return {k: (rep if k in keys else v) for k, v in item.items()} if isinstance(item, dict) else item
+    @robust_execution
+    def transform(self, key: str, modifier: Callable[[Any], Any]) -> Any:
+        if key not in self.registry:
+            raise KeyError(f"Key {key} missing from registry")
+        
+        raw_data = self.registry.get(key)
+        if raw_data is None:
+            raise ValueError("Null data encountered")
+            
+        return modifier(raw_data)
 
-def process_data(data: Any) -> DataTransformer:
-    return DataTransformer(data)
+def sanitize_input(data: Any) -> str:
+    if not isinstance(data, (str, int, float)):
+        raise TypeError("Invalid data type for sanitization")
+    return str(data).strip().lower()
