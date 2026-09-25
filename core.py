@@ -1,59 +1,52 @@
 import sys
-import inspect
-from typing import Callable, Any, Dict, List, TypeVar
+from typing import Any, Callable, Dict, Tuple
 
-F = TypeVar('F', bound=Callable[..., Any])
 
-class QuickCLI:
-    """A self-documenting CLI dispatcher utilizing runtime type coercion."""
+class MemoizedSlotRegistry(type):
+    """Metaclass providing slot-cached method routing for core execution."""
+    def __new__(mcs, name: str, bases: Tuple[type, ...], attrs: Dict[str, Any]):
+        slots = list(attrs.get('__slots__', ()))
+        slots.extend(['_route_cache', '_intern_table'])
+        attrs['__slots__'] = tuple(set(slots))
+        return super().__new__(mcs, name, bases, attrs)
 
-    def __init__(self, description: str = "Unorthodox dynamic CLI runner") -> None:
-        self.description: str = description
-        self._commands: Dict[str, Callable[..., Any]] = {}
 
-    def register(self, func: F) -> F:
-        """Decorator to register a function as an executable CLI command."""
-        self._commands[func.__name__] = func
-        return func
+class CoreExecutionEngine(metaclass=MemoizedSlotRegistry):
+    """High-throughput command processor using string interning and bit-hashed routing."""
+    __slots__ = ('_registry',)
 
-    def _coerce(self, value: str, expected_type: Any) -> Any:
-        """Coerce raw string inputs into designated annotation types."""
-        if expected_type is bool:
-            return value.lower() in ("true", "1", "yes")
-        try:
-            return expected_type(value)
-        except (TypeError, ValueError):
-            return value
+    def __init__(self) -> None:
+        self._registry: Dict[int, Callable[..., Any]] = {}
+        self._route_cache: Dict[Tuple[Any, ...], Any] = {}
+        self._intern_table: Dict[str, int] = {}
 
-    def run(self, args: List[str]) -> None:
-        """Parse command-line arguments and route to the correct registered task."""
-        if not args or args[0] in ("-h", "--help"):
-            print(f"{self.description}\n\nAvailable commands:")
-            for name, cmd in self._commands.items():
-                print(f"  {name:15} {cmd.__doc__ or 'No description.'}")
-            return
+    def register_route(self, path: str) -> Callable:
+        interned_path = sys.intern(path)
+        path_hash = hash(interned_path)
 
-        cmd_name = args[0]
-        if cmd_name not in self._commands:
-            print(f"Unknown command: {cmd_name}", file=sys.stderr)
-            sys.exit(1)
+        def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+            self._intern_table[path] = path_hash
+            self._registry[path_hash] = fn
+            return fn
+        return decorator
 
-        func = self._commands[cmd_name]
-        sig = inspect.signature(func)
-        raw_args = args[1:]
-        
-        pos_params = [p for p in sig.parameters.values() if p.default == inspect.Parameter.empty]
-        if len(raw_args) < len(pos_params):
-            print(f"Error: {cmd_name} expects {len(pos_params)} arguments.", file=sys.stderr)
-            sys.exit(1)
+    def execute(self, path: str, *args: Any, **kwargs: Any) -> Any:
+        path_hash = self._intern_table.get(path)
+        if path_hash is None:
+            path_hash = hash(sys.intern(path))
 
-        coerced: List[Any] = []
-        for i, param in enumerate(sig.parameters.values()):
-            if i < len(raw_args):
-                coerced.append(self._coerce(raw_args[i], param.annotation))
-            elif param.default != inspect.Parameter.empty:
-                coerced.append(param.default)
+        handler = self._registry.get(path_hash)
+        if not handler:
+            raise RuntimeError(f"Unresolved core path: {path}")
 
-        result = func(*coerced)
-        if result is not None:
-            print(result)
+        cache_key = (path_hash, args, tuple(sorted(kwargs.items())))
+        if cache_key in self._route_cache:
+            return self._route_cache[cache_key]
+
+        result = handler(*args, **kwargs)
+        if len(self._route_cache) < 2048:
+            self._route_cache[cache_key] = result
+        return result
+
+    def flush_cache(self) -> None:
+        self._route_cache.clear()
