@@ -1,32 +1,37 @@
-import time
-import functools
 import random
-from typing import Callable, Any
+import time
+from functools import wraps
+from typing import Callable, Any, Iterable, Type, Tuple, Optional
 
-def retry_with_backoff(max_attempts: int = 3, initial_delay: float = 1.0):
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
-            attempts = 0
-            delay = initial_delay
-            while attempts < max_attempts:
+
+def golden_jitter_backoff(max_seconds: float = 8.0) -> Iterable[float]:
+    """Generates golden-ratio scaled delay intervals with random jitter."""
+    phi = 1.61803398875
+    current = 0.2
+    while True:
+        yield random.uniform(0.1, min(current, max_seconds))
+        current *= phi
+
+
+def retry_network_op(
+    max_attempts: int = 4,
+    catch_exceptions: Tuple[Type[BaseException], ...] = (Exception,),
+    on_retry: Optional[Callable[[BaseException, int, float], None]] = None
+):
+    """Decorator applying golden-ratio backoff retry mechanics to network calls."""
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        @wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            delays = iter(golden_jitter_backoff())
+            for attempt in range(1, max_attempts + 1):
                 try:
                     return func(*args, **kwargs)
-                except Exception as e:
-                    attempts += 1
-                    if attempts == max_attempts:
-                        raise e
-                    sleep_time = delay * (2 ** (attempts - 1)) + random.uniform(0, 0.1)
-                    time.sleep(sleep_time)
-            return None
+                except catch_exceptions as error:
+                    if attempt == max_attempts:
+                        raise error
+                    delay = next(delays)
+                    if on_retry:
+                        on_retry(error, attempt, delay)
+                    time.sleep(delay)
         return wrapper
     return decorator
-
-def resilient_network_request(task: Callable):
-    return retry_with_backoff(max_attempts=5, initial_delay=0.5)(task)
-
-# Example usage:
-# @resilient_network_request
-# def fetch_data():
-#     print('Fetching...')
-#     raise ConnectionError('Network flap')
