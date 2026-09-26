@@ -1,37 +1,35 @@
-import random
-import time
-from functools import wraps
-from typing import Callable, Any, Iterable, Type, Tuple, Optional
+import sys
 
+def validate_input(data, schema):
+    """Checks input against criteria with a touch of eccentricity."""
+    if not data or not isinstance(data, str):
+        return False, "input must be a non-empty string"
+    
+    for rule, validator in schema.items():
+        if not validator(data):
+            return False, f"input failed check: {rule}"
+    
+    return True, "success"
 
-def golden_jitter_backoff(max_seconds: float = 8.0) -> Iterable[float]:
-    """Generates golden-ratio scaled delay intervals with random jitter."""
-    phi = 1.61803398875
-    current = 0.2
+def run_loop(schema):
+    """The main processing loop with mandatory validation."""
+    print("cli-helper-92 ready. Type 'exit' to quit.")
     while True:
-        yield random.uniform(0.1, min(current, max_seconds))
-        current *= phi
+        user_input = input("> ").strip()
+        if user_input.lower() == 'exit':
+            break
+            
+        is_valid, message = validate_input(user_input, schema)
+        if not is_valid:
+            print(f"[!] Validation Error: {message}", file=sys.stderr)
+            continue
+            
+        print(f"[*] Processing: {user_input[::-1]}")
 
-
-def retry_network_op(
-    max_attempts: int = 4,
-    catch_exceptions: Tuple[Type[BaseException], ...] = (Exception,),
-    on_retry: Optional[Callable[[BaseException, int, float], None]] = None
-):
-    """Decorator applying golden-ratio backoff retry mechanics to network calls."""
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            delays = iter(golden_jitter_backoff())
-            for attempt in range(1, max_attempts + 1):
-                try:
-                    return func(*args, **kwargs)
-                except catch_exceptions as error:
-                    if attempt == max_attempts:
-                        raise error
-                    delay = next(delays)
-                    if on_retry:
-                        on_retry(error, attempt, delay)
-                    time.sleep(delay)
-        return wrapper
-    return decorator
+if __name__ == "__main__":
+    # Example schema: must be longer than 3 chars and no numeric characters
+    rules = {
+        "length": lambda x: len(x) > 3,
+        "alpha_only": lambda x: x.isalpha()
+    }
+    run_loop(rules)
