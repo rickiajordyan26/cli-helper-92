@@ -1,32 +1,34 @@
-import sys
-from datetime import datetime
-from typing import Any
+import logging
+from logging.handlers import RotatingFileHandler
+import os
 
-class CLIFormatter:
-    def __init__(self, color_mode: bool = True):
-        self.colors = {"info": "\033[94m", "warn": "\033[93m", "err": "\033[91m", "reset": "\033[0m"}
-        self.color_mode = color_mode
+class LoggerSetup:
+    def __init__(self, name='cli-helper', log_file='app.log', max_bytes=1024*1024, backup_count=3):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.DEBUG)
+        
+        formatter = logging.Formatter(
+            '[%(asctime)s] %(levelname)-8s | %(name)s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
 
-    def format(self, level: str, message: str) -> str:
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        prefix = self.colors.get(level, "") if self.color_mode else ""
-        suffix = self.colors["reset"] if self.color_mode else ""
-        return f"[{timestamp}] {prefix}{level.upper()}{suffix}: {message}"
+        # File handler with rotation logic
+        file_handler = RotatingFileHandler(
+            log_file, 
+            maxBytes=max_bytes, 
+            backupCount=backup_count
+        )
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
 
-class Logger:
-    def __init__(self, name: str):
-        self.name = name
-        self.formatter = CLIFormatter()
+        # Console output for visibility
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
 
-    def _log(self, level: str, msg: Any) -> None:
-        formatted = self.formatter.format(level, str(msg))
-        stream = sys.stderr if level == "err" else sys.stdout
-        print(f"[{self.name}] {formatted}", file=stream)
+    def get_logger(self):
+        return self.logger
 
-    def info(self, msg: Any) -> None: self._log("info", msg)
-    def warn(self, msg: Any) -> None: self._log("warn", msg)
-    def error(self, msg: Any) -> None: self._log("err", msg)
-
-# Singleton accessor for project consistency
-def get_logger(name: str = "cli-helper-92") -> Logger:
-    return Logger(name)
+# Helper to instantiate on demand
+def setup_logger():
+    return LoggerSetup().get_logger()
