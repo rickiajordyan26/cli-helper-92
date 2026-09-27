@@ -1,34 +1,34 @@
-import logging
-from logging.handlers import RotatingFileHandler
-import os
+import sys
+import functools
+import traceback
 
-class LoggerSetup:
-    def __init__(self, name='cli-helper', log_file='app.log', max_bytes=1024*1024, backup_count=3):
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(logging.DEBUG)
-        
-        formatter = logging.Formatter(
-            '[%(asctime)s] %(levelname)-8s | %(name)s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+def robust_log(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as e:
+            ctx = {
+                'func': func.__name__,
+                'args': args,
+                'error': str(e),
+                'trace': traceback.format_exc()
+            }
+            _dump_to_emergency_buffer(ctx)
+            return None
+    return wrapper
 
-        # File handler with rotation logic
-        file_handler = RotatingFileHandler(
-            log_file, 
-            maxBytes=max_bytes, 
-            backupCount=backup_count
-        )
-        file_handler.setFormatter(formatter)
-        self.logger.addHandler(file_handler)
+def _dump_to_emergency_buffer(data):
+    try:
+        with open('.emergency_log', 'a') as f:
+            f.write(f"{repr(data)}\n")
+    except Exception:
+        sys.stderr.write("Emergency logging failure: critical system state.\n")
 
-        # Console output for visibility
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
-
-    def get_logger(self):
-        return self.logger
-
-# Helper to instantiate on demand
-def setup_logger():
-    return LoggerSetup().get_logger()
+@robust_log
+def safe_execute(action, *args):
+    if not callable(action):
+        raise ValueError(f"Action {action} is not executable")
+    return action(*args)
