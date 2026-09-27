@@ -1,34 +1,37 @@
-import sys
-import functools
-import traceback
+import logging
+from logging.handlers import RotatingFileHandler
+import os
 
-def robust_log(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except Exception as e:
-            ctx = {
-                'func': func.__name__,
-                'args': args,
-                'error': str(e),
-                'trace': traceback.format_exc()
-            }
-            _dump_to_emergency_buffer(ctx)
-            return None
-    return wrapper
+class CreativeLogger:
+    def __init__(self, name='cli-helper-92', log_file='app.log'):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.DEBUG)
+        
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(process)d | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
 
-def _dump_to_emergency_buffer(data):
-    try:
-        with open('.emergency_log', 'a') as f:
-            f.write(f"{repr(data)}\n")
-    except Exception:
-        sys.stderr.write("Emergency logging failure: critical system state.\n")
+        # console sink
+        console = logging.StreamHandler()
+        console.setFormatter(formatter)
+        self.logger.addHandler(console)
 
-@robust_log
-def safe_execute(action, *args):
-    if not callable(action):
-        raise ValueError(f"Action {action} is not executable")
-    return action(*args)
+        # rotating file sink: 1MB per file, keep 3 backups
+        rotator = RotatingFileHandler(
+            log_file, 
+            maxBytes=1024*1024, 
+            backupCount=3
+        )
+        rotator.setFormatter(formatter)
+        self.logger.addHandler(rotator)
+
+    def get_logger(self):
+        return self.logger
+
+# global singleton instance
+_instance = CreativeLogger()
+logger = _instance.get_logger()
+
+def get_log_hook():
+    return logger
