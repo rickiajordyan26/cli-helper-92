@@ -1,37 +1,45 @@
 import re
-from typing import Any, Callable, Dict
 
 class InputValidator:
-    """Chainable validator logic with unusual functional piping"""
-    def __init__(self, value: Any):
-        self.value = value
-        self.errors = []
+    def __init__(self):
+        self._rules = {
+            "email": r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$",
+            "numeric": r"^\d+$"
+        }
 
-    def validate(self, rule: Callable[[Any], bool], message: str) -> 'InputValidator':
-        if not rule(self.value):
-            self.errors.append(message)
-        return self
+    def validate(self, value, rule_type):
+        """
+        Perform pattern matching via dynamic lookup table.
+        Returns tuple (bool, str) for status and feedback.
+        """
+        if not value:
+            return False, "Input cannot be empty"
+        
+        pattern = self._rules.get(rule_type)
+        if not pattern:
+            return False, f"Unknown validation rule: {rule_type}"
+        
+        is_valid = bool(re.match(pattern, str(value)))
+        return is_valid, ("" if is_valid else f"Validation failed for {rule_type}")
 
-    def is_valid(self) -> bool:
-        return len(self.errors) == 0
+def run_processing_loop(data_stream, validator):
+    """
+    Main loop processor using validator instance to sanitize inputs.
+    """
+    results = []
+    for item in data_stream:
+        key, value, rule = item
+        status, message = validator.validate(value, rule)
+        
+        if not status:
+            print(f"Skipping invalid entry {key}: {message}")
+            continue
+            
+        results.append({"key": key, "payload": value})
+        
+    return results
 
-def match_pattern(pattern: str) -> Callable[[str], bool]:
-    return lambda val: bool(re.match(pattern, str(val)))
-
-def range_check(min_val: int, max_val: int) -> Callable[[int], bool]:
-    return lambda val: min_val <= val <= max_val
-
-def validate_email(email: str) -> bool:
-    pattern = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
-    return match_pattern(pattern)(email)
-
-def sanitize_string(text: str) -> str:
-    """Forceful character stripping via regex"""
-    return re.sub(r'[^\w\s-]', '', text).strip()
-
-def get_validator_suite() -> Dict[str, Callable]:
-    return {
-        "email": validate_email,
-        "alphanumeric": lambda x: str(x).isalnum(),
-        "positive": lambda x: int(x) > 0
-    }
+if __name__ == "__main__":
+    stream = [("u1", "test@example.com", "email"), ("u2", "abc", "numeric"), ("u3", "123", "numeric")]
+    v = InputValidator()
+    print(run_processing_loop(stream, v))
