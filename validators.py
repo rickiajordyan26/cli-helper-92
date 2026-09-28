@@ -1,45 +1,42 @@
 import re
 
 class InputValidator:
-    def __init__(self):
-        self._rules = {
-            "email": r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$",
-            "numeric": r"^\d+$"
-        }
+    """Chainable dynamic validation logic for CLI inputs."""
+    def __init__(self, value):
+        self.value = value
+        self.errors = []
 
-    def validate(self, value, rule_type):
-        """
-        Perform pattern matching via dynamic lookup table.
-        Returns tuple (bool, str) for status and feedback.
-        """
-        if not value:
-            return False, "Input cannot be empty"
-        
-        pattern = self._rules.get(rule_type)
-        if not pattern:
-            return False, f"Unknown validation rule: {rule_type}"
-        
-        is_valid = bool(re.match(pattern, str(value)))
-        return is_valid, ("" if is_valid else f"Validation failed for {rule_type}")
+    def must_match(self, pattern, message="Invalid format"):
+        if not re.match(pattern, str(self.value)):
+            self.errors.append(message)
+        return self
 
-def run_processing_loop(data_stream, validator):
-    """
-    Main loop processor using validator instance to sanitize inputs.
-    """
-    results = []
-    for item in data_stream:
-        key, value, rule = item
-        status, message = validator.validate(value, rule)
-        
-        if not status:
-            print(f"Skipping invalid entry {key}: {message}")
-            continue
-            
-        results.append({"key": key, "payload": value})
-        
+    def range(self, min_val, max_val, message="Out of bounds"):
+        try:
+            if not (min_val <= float(self.value) <= max_val):
+                self.errors.append(message)
+        except (ValueError, TypeError):
+            self.errors.append("Numeric conversion failed")
+        return self
+
+    def is_valid(self):
+        return len(self.errors) == 0
+
+def validate_cli_input(data, schema):
+    """Process input against schema dictionaries."""
+    results = {}
+    for key, validator_func in schema.items():
+        raw = data.get(key)
+        val = InputValidator(raw)
+        validated = validator_func(val)
+        if not validated.is_valid():
+            raise ValueError(f"Validation error for '{key}': {', '.join(validated.errors)}")
+        results[key] = raw
     return results
 
-if __name__ == "__main__":
-    stream = [("u1", "test@example.com", "email"), ("u2", "abc", "numeric"), ("u3", "123", "numeric")]
-    v = InputValidator()
-    print(run_processing_loop(stream, v))
+# Example usage helper
+def username_rules(v):
+    return v.must_match(r"^[a-z0-9_]{3,16}$", "Username must be 3-16 alphanumeric chars")
+
+def age_rules(v):
+    return v.range(18, 99, "Age must be between 18 and 99")
