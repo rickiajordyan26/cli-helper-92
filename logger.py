@@ -1,37 +1,34 @@
 import sys
-import logging
-from typing import Any, Callable
+import datetime
+from functools import wraps
 
-class ExceptionGuard:
-    def __init__(self, logger: logging.Logger):
-        self.logger = logger
+class CreativeLogger:
+    def __init__(self, stream=sys.stdout):
+        self.stream = stream
+        self.colors = {'INFO': '\033[94m', 'WARN': '\033[93m', 'ERROR': '\033[91m', 'END': '\033[0m'}
 
-    def __call__(self, func: Callable) -> Callable:
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
+    def log(self, level, message):
+        ts = datetime.datetime.now().strftime('%H:%M:%S')
+        color = self.colors.get(level, '')
+        print(f"{color}[{level}] {ts} | {message}{self.colors['END']}", file=self.stream)
+
+    def trace_execution(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            self.log('INFO', f"entering {func.__name__} with {args}")
             try:
-                return func(*args, **kwargs)
-            except (ValueError, TypeError, AttributeError) as e:
-                self.logger.error(f"edge case failure in {func.__name__}: {str(e)}")
-                return None
+                result = func(*args, **kwargs)
+                self.log('INFO', f"exiting {func.__name__} with result {result}")
+                return result
             except Exception as e:
-                self.logger.critical(f"unhandled chaos in {func.__name__}: {type(e).__name__}")
-                sys.exit(1)
+                self.log('ERROR', f"{func.__name__} crashed: {e}")
+                raise
         return wrapper
 
-def setup_logger(name: str = "cli-helper-92") -> logging.Logger:
-    logger = logging.getLogger(name)
-    if not logger.handlers:
-        handler = logging.StreamHandler(sys.stderr)
-        formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        logger.setLevel(logging.DEBUG)
-    return logger
+def get_logger():
+    return CreativeLogger()
 
-class ResilientLogger:
-    def __init__(self):
-        self.log = setup_logger()
-        self.guard = ExceptionGuard(self.log)
-
-    def safe_execute(self, func: Callable, *args: Any, **kwargs: Any) -> Any:
-        return self.guard(func)(*args, **kwargs)
+# Usage:
+# log = get_logger()
+# @log.trace_execution
+# def example(x): return x * 2
