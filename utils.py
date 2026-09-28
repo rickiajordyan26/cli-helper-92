@@ -1,34 +1,26 @@
 import time
 import functools
-import logging
+import random
 
-logger = logging.getLogger(__name__)
-
-def retry_operation(max_attempts=3, backoff=2):
+def retry(max_attempts=3, delay=1, backoff=2):
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            attempts = 0
-            current_delay = 1
-            while attempts < max_attempts:
+            tries, current_delay = max_attempts, delay
+            while tries > 0:
                 try:
                     return func(*args, **kwargs)
-                except (ConnectionError, TimeoutError) as e:
-                    attempts += 1
-                    if attempts >= max_attempts:
-                        logger.error(f'failed after {attempts} attempts')
-                        raise
-                    logger.warning(f'retry {attempts}/{max_attempts} after error: {e}')
-                    time.sleep(current_delay)
+                except Exception as e:
+                    tries -= 1
+                    if tries == 0:
+                        raise e
+                    time.sleep(current_delay + random.uniform(0, 0.1))
                     current_delay *= backoff
-            return None
         return wrapper
     return decorator
 
-@retry_operation(max_attempts=3)
-def fetch_network_resource(url):
-    # Simulate network instability
-    import random
-    if random.random() < 0.7:
-        raise ConnectionError('intermittent network failure')
-    return f'data from {url}'
+def network_request_executor(url, fetch_func):
+    @retry(max_attempts=4, delay=0.5)
+    def operation():
+        return fetch_func(url)
+    return operation()
