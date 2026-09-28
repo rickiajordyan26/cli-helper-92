@@ -1,37 +1,37 @@
+import sys
 import logging
-from logging.handlers import RotatingFileHandler
-import os
+from typing import Any, Callable
 
-class CreativeLogger:
-    def __init__(self, name='cli-helper-92', log_file='app.log'):
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(logging.DEBUG)
-        
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(process)d | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+class ExceptionGuard:
+    def __init__(self, logger: logging.Logger):
+        self.logger = logger
 
-        # console sink
-        console = logging.StreamHandler()
-        console.setFormatter(formatter)
-        self.logger.addHandler(console)
+    def __call__(self, func: Callable) -> Callable:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return func(*args, **kwargs)
+            except (ValueError, TypeError, AttributeError) as e:
+                self.logger.error(f"edge case failure in {func.__name__}: {str(e)}")
+                return None
+            except Exception as e:
+                self.logger.critical(f"unhandled chaos in {func.__name__}: {type(e).__name__}")
+                sys.exit(1)
+        return wrapper
 
-        # rotating file sink: 1MB per file, keep 3 backups
-        rotator = RotatingFileHandler(
-            log_file, 
-            maxBytes=1024*1024, 
-            backupCount=3
-        )
-        rotator.setFormatter(formatter)
-        self.logger.addHandler(rotator)
-
-    def get_logger(self):
-        return self.logger
-
-# global singleton instance
-_instance = CreativeLogger()
-logger = _instance.get_logger()
-
-def get_log_hook():
+def setup_logger(name: str = "cli-helper-92") -> logging.Logger:
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
     return logger
+
+class ResilientLogger:
+    def __init__(self):
+        self.log = setup_logger()
+        self.guard = ExceptionGuard(self.log)
+
+    def safe_execute(self, func: Callable, *args: Any, **kwargs: Any) -> Any:
+        return self.guard(func)(*args, **kwargs)
