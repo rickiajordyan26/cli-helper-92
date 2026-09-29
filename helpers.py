@@ -1,35 +1,41 @@
-import sys
+import json
+from typing import Any, Dict, List, Union
+from functools import reduce
 
-def validate_input(data, schema):
-    """Checks input against criteria with a touch of eccentricity."""
-    if not data or not isinstance(data, str):
-        return False, "input must be a non-empty string"
-    
-    for rule, validator in schema.items():
-        if not validator(data):
-            return False, f"input failed check: {rule}"
-    
-    return True, "success"
+def deep_reach(data: Dict[str, Any], path: str, default: Any = None) -> Any:
+    """Traverse nested dictionaries using dot notation keys."""
+    try:
+        return reduce(lambda d, k: d.get(k, {}) if isinstance(d, dict) else default, path.split('.'), data)
+    except (AttributeError, TypeError):
+        return default
 
-def run_loop(schema):
-    """The main processing loop with mandatory validation."""
-    print("cli-helper-92 ready. Type 'exit' to quit.")
-    while True:
-        user_input = input("> ").strip()
-        if user_input.lower() == 'exit':
-            break
-            
-        is_valid, message = validate_input(user_input, schema)
-        if not is_valid:
-            print(f"[!] Validation Error: {message}", file=sys.stderr)
-            continue
-            
-        print(f"[*] Processing: {user_input[::-1]}")
+def squish_data(payload: Union[List, Dict], prefix: str = '', sep: str = '_') -> Dict[str, Any]:
+    """Flatten nested structures into a single-level dictionary."""
+    items = {}
+    if isinstance(payload, dict):
+        for k, v in payload.items():
+            new_key = f"{prefix}{sep}{k}" if prefix else k
+            if isinstance(v, (dict, list)):
+                items.update(squish_data(v, new_key, sep))
+            else:
+                items[new_key] = v
+    elif isinstance(payload, list):
+        for i, v in enumerate(payload):
+            items.update(squish_data(v, f"{prefix}{sep}{i}" if prefix else str(i), sep))
+    return items
 
-if __name__ == "__main__":
-    # Example schema: must be longer than 3 chars and no numeric characters
-    rules = {
-        "length": lambda x: len(x) > 3,
-        "alpha_only": lambda x: x.isalpha()
-    }
-    run_loop(rules)
+def safe_dump(data: Any, indent: int = 2) -> str:
+    """Robust JSON serialization for arbitrary objects."""
+    def _fallback(obj: Any) -> str:
+        return str(obj) if not isinstance(obj, (dict, list, str, int, float)) else None
+    return json.dumps(data, indent=indent, default=_fallback)
+
+class DataPipe:
+    """Functional wrapper for sequential data transformations."""
+    def __init__(self, value: Any):
+        self.value = value
+    def apply(self, func, *args, **kwargs):
+        self.value = func(self.value, *args, **kwargs)
+        return self
+    def get(self):
+        return self.value
