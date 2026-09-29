@@ -1,52 +1,48 @@
-import sys
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable
 
 
-class MemoizedSlotRegistry(type):
-    """Metaclass providing slot-cached method routing for core execution."""
-    def __new__(mcs, name: str, bases: Tuple[type, ...], attrs: Dict[str, Any]):
-        slots = list(attrs.get('__slots__', ()))
-        slots.extend(['_route_cache', '_intern_table'])
-        attrs['__slots__'] = tuple(set(slots))
-        return super().__new__(mcs, name, bases, attrs)
+class DataStream:
+    """Creative pipeline wrapper for flexible dictionary and list transformations."""
+
+    def __init__(self, data: Any):
+        self._data = data
+
+    @property
+    def value(self) -> Any:
+        return self._data
+
+    def __or__(self, func: Callable[[Any], Any]) -> "DataStream":
+        """Pipe data into a transforming function or item-wise map."""
+        if isinstance(self._data, list) and not getattr(func, "__is_aggregate__", False):
+            return DataStream([func(item) for item in self._data])
+        return DataStream(func(self._data))
+
+    def __matmul__(self, path: str) -> "DataStream":
+        """Extract nested key or index using @ syntax ('user.profile.id')."""
+        current = self._data
+        for key in path.split("."):
+            if isinstance(current, dict):
+                current = current.get(key)
+            elif isinstance(current, (list, tuple)) and key.isdigit():
+                idx = int(key)
+                current = current[idx] if 0 <= idx < len(current) else None
+            else:
+                current = None
+            if current is None:
+                break
+        return DataStream(current)
+
+    def __repr__(self) -> str:
+        return f"DataStream({repr(self._data)})"
 
 
-class CoreExecutionEngine(metaclass=MemoizedSlotRegistry):
-    """High-throughput command processor using string interning and bit-hashed routing."""
-    __slots__ = ('_registry',)
-
-    def __init__(self) -> None:
-        self._registry: Dict[int, Callable[..., Any]] = {}
-        self._route_cache: Dict[Tuple[Any, ...], Any] = {}
-        self._intern_table: Dict[str, int] = {}
-
-    def register_route(self, path: str) -> Callable:
-        interned_path = sys.intern(path)
-        path_hash = hash(interned_path)
-
-        def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-            self._intern_table[path] = path_hash
-            self._registry[path_hash] = fn
-            return fn
-        return decorator
-
-    def execute(self, path: str, *args: Any, **kwargs: Any) -> Any:
-        path_hash = self._intern_table.get(path)
-        if path_hash is None:
-            path_hash = hash(sys.intern(path))
-
-        handler = self._registry.get(path_hash)
-        if not handler:
-            raise RuntimeError(f"Unresolved core path: {path}")
-
-        cache_key = (path_hash, args, tuple(sorted(kwargs.items())))
-        if cache_key in self._route_cache:
-            return self._route_cache[cache_key]
-
-        result = handler(*args, **kwargs)
-        if len(self._route_cache) < 2048:
-            self._route_cache[cache_key] = result
-        return result
-
-    def flush_cache(self) -> None:
-        self._route_cache.clear()
+def flatten_keys(data: dict, prefix: str = "", sep: str = ".") -> dict:
+    """Recursively flatten nested dictionary keys."""
+    items = []
+    for k, v in data.items():
+        new_key = f"{prefix}{sep}{k}" if prefix else str(k)
+        if isinstance(v, dict):
+            items.extend(flatten_keys(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
