@@ -1,41 +1,35 @@
-import json
-from typing import Any, Dict, List, Union
-from functools import reduce
+import time
+import functools
+import random
+from typing import Callable, Any
 
-def deep_reach(data: Dict[str, Any], path: str, default: Any = None) -> Any:
-    """Traverse nested dictionaries using dot notation keys."""
-    try:
-        return reduce(lambda d, k: d.get(k, {}) if isinstance(d, dict) else default, path.split('.'), data)
-    except (AttributeError, TypeError):
-        return default
+def retry_with_backoff(max_attempts: int = 3, initial_delay: float = 1.0, factor: float = 2.0):
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            attempts = 0
+            delay = initial_delay
+            while attempts < max_attempts:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    attempts += 1
+                    if attempts >= max_attempts:
+                        raise e
+                    sleep_time = delay * (1 + random.random() * 0.1)
+                    time.sleep(sleep_time)
+                    delay *= factor
+            return None
+        return wrapper
+    return decorator
 
-def squish_data(payload: Union[List, Dict], prefix: str = '', sep: str = '_') -> Dict[str, Any]:
-    """Flatten nested structures into a single-level dictionary."""
-    items = {}
-    if isinstance(payload, dict):
-        for k, v in payload.items():
-            new_key = f"{prefix}{sep}{k}" if prefix else k
-            if isinstance(v, (dict, list)):
-                items.update(squish_data(v, new_key, sep))
-            else:
-                items[new_key] = v
-    elif isinstance(payload, list):
-        for i, v in enumerate(payload):
-            items.update(squish_data(v, f"{prefix}{sep}{i}" if prefix else str(i), sep))
-    return items
+@retry_with_backoff(max_attempts=5)
+def execute_request(request_func: Callable, *args: Any) -> Any:
+    return request_func(*args)
 
-def safe_dump(data: Any, indent: int = 2) -> str:
-    """Robust JSON serialization for arbitrary objects."""
-    def _fallback(obj: Any) -> str:
-        return str(obj) if not isinstance(obj, (dict, list, str, int, float)) else None
-    return json.dumps(data, indent=indent, default=_fallback)
+class NetworkSession:
+    def __init__(self, timeout: int = 10):
+        self.timeout = timeout
 
-class DataPipe:
-    """Functional wrapper for sequential data transformations."""
-    def __init__(self, value: Any):
-        self.value = value
-    def apply(self, func, *args, **kwargs):
-        self.value = func(self.value, *args, **kwargs)
-        return self
-    def get(self):
-        return self.value
+    def fetch(self, url: str):
+        return f"data from {url}"
