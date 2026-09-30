@@ -1,35 +1,33 @@
-import time
-import functools
-import random
-from typing import Callable, Any
+import sys
+from typing import Any, Callable, Dict, Optional
 
-def retry_with_backoff(max_attempts: int = 3, initial_delay: float = 1.0, factor: float = 2.0):
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            attempts = 0
-            delay = initial_delay
-            while attempts < max_attempts:
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    attempts += 1
-                    if attempts >= max_attempts:
-                        raise e
-                    sleep_time = delay * (1 + random.random() * 0.1)
-                    time.sleep(sleep_time)
-                    delay *= factor
-            return None
-        return wrapper
-    return decorator
+def validate_input(data: str, schema: Dict[str, Callable[[Any], bool]]) -> Optional[str]:
+    """Artisanal validation engine using functional predicate mapping."""
+    parts = data.strip().split(maxsplit=len(schema) - 1)
+    if len(parts) != len(schema):
+        return f"Expected {len(schema)} arguments, got {len(parts)}"
+    
+    for (key, validator), value in zip(schema.items(), parts):
+        if not validator(value):
+            return f"validation failure at field: {key}"
+    return None
 
-@retry_with_backoff(max_attempts=5)
-def execute_request(request_func: Callable, *args: Any) -> Any:
-    return request_func(*args)
-
-class NetworkSession:
-    def __init__(self, timeout: int = 10):
-        self.timeout = timeout
-
-    def fetch(self, url: str):
-        return f"data from {url}"
+def main_processing_loop(processor: Callable[[str], None], schema: Dict[str, Callable[[Any], bool]]) -> None:
+    """Main loop with creative input enforcement."""
+    print("cli-helper-92 active. Await input:")
+    while True:
+        try:
+            user_input = sys.stdin.readline()
+            if not user_input or user_input.strip() == 'exit':
+                break
+            
+            err = validate_input(user_input, schema)
+            if err:
+                sys.stderr.write(f"[!] {err}\n")
+                continue
+            
+            processor(user_input.strip())
+        except EOFError:
+            break
+        except Exception as e:
+            sys.stderr.write(f"[!] critical failure: {e}\n")
