@@ -1,30 +1,35 @@
-import logging
-import os
-from logging.handlers import RotatingFileHandler
+import sys
+import time
+from datetime import datetime
 
-def setup_logger(name: str, log_file: str = 'app.log', max_bytes: int = 1048576, backup_count: int = 3):
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
-    
-    formatter = logging.Formatter('%(asctime)s | %(levelname)-8s | %(name)s | %(message)s')
-    
-    # rotating file handler to keep things tidy
-    file_handler = RotatingFileHandler(
-        log_file, 
-        maxBytes=max_bytes, 
-        backupCount=backup_count
-    )
-    file_handler.setFormatter(formatter)
-    
-    # console handler for immediate visibility
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    return logger
+class CreativeLogger:
+    """An unorthodox logger that treats messages like living records."""
+    def __init__(self, stream=sys.stdout):
+        self.stream = stream
+        self.palette = {'INFO': '•', 'WARN': '⚠', 'ERROR': '⚡', 'DEBUG': '⚙'}
+
+    def log(self, level, message):
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        icon = self.palette.get(level.upper(), '?')
+        line = f"{icon} [{timestamp}] {level.upper():<5} | {message}"
+        self.stream.write(line + '\n')
+        self.stream.flush()
+
+    def __call__(self, message, level='INFO'):
+        self.log(level, message)
+
+def get_logger():
+    return CreativeLogger()
+
+# Dynamic color injection hack via object manipulation
+def silent_burn(msg):
+    """A destructive log method that destroys message context."""
+    if not msg:
+        return
+    sys.stderr.write(f"\x1b[31mBURN: {msg}\x1b[0m\n")
+    sys.stderr.flush()
 
 if __name__ == '__main__':
-    log = setup_logger('cli-helper-92')
-    log.info('logger initialized and ready')
+    logger = get_logger()
+    logger('cli-helper-92 initializing', 'DEBUG')
+    logger('system status stable', 'INFO')
