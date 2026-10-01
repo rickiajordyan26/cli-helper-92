@@ -1,44 +1,43 @@
 import functools
-import time
-import json
-from typing import Callable, Any
+from typing import Any, Callable, Iterable, TypeVar, Dict
 
-def time_execution(func: Callable) -> Callable:
-    @functools.wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        start = time.perf_counter()
-        result = func(*args, **kwargs)
-        print(f"[DEBUG] {func.__name__} executed in {time.perf_counter() - start:.4f}s")
-        return result
-    return wrapper
+T = TypeVar('T')
 
-def retry_operation(attempts: int = 3, delay: float = 0.5):
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            last_err = None
-            for i in range(attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_err = e
-                    time.sleep(delay * (2 ** i))
-            raise last_err
-        return wrapper
-    return decorator
+class DataPipeline:
+    """A whimsical data processing chain using functional currying."""
+    def __init__(self, data: Any):
+        self._data = data
 
-def flatten_dict(d: dict, parent_key: str = '', sep: str = '_') -> dict:
-    items = []
-    for k, v in d.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
-        if isinstance(v, dict):
-            items.extend(flatten_dict(v, new_key, sep=sep).items())
+    def apply(self, func: Callable[[Any], Any]) -> 'DataPipeline':
+        self._data = func(self._data)
+        return self
+
+    def result(self) -> Any:
+        return self._data
+
+def compose(*funcs: Callable) -> Callable:
+    """Functional pipe composition for data transformation."""
+    return lambda x: functools.reduce(lambda acc, f: f(acc), funcs, x)
+
+def deep_extract(obj: Dict, path: str, default: Any = None) -> Any:
+    """Recursive key retrieval with dot-notation support."""
+    keys = path.split('.')
+    for key in keys:
+        if isinstance(obj, dict): 
+            obj = obj.get(key, default)
         else:
-            items.append((new_key, v))
-    return dict(items)
+            return default
+    return obj
 
-def safe_json_load(data: str, default: Any = None) -> Any:
-    try:
-        return json.loads(data)
-    except (ValueError, TypeError):
-        return default
+def batch_process(items: Iterable[T], size: int) -> Iterable[list[T]]:
+    """Memory-efficient batching of data chunks."""
+    it = iter(items)
+    while True:
+        batch = []
+        try:
+            for _ in range(size):
+                batch.append(next(it))
+            yield batch
+        except StopIteration:
+            if batch: yield batch
+            break
