@@ -1,61 +1,68 @@
-import sys
-import re
-from typing import Callable, Dict, List, Optional
+from typing import Any, Union, Dict, List
 
-class OutputSanitizer:
-    """Registry and runner for CLI output formatting and ANSI cleanup."""
-    _transformers: Dict[str, Callable[[str], str]] = {}
+class FuzzyDataWeaver:
+    """
+    A creative data-handling wrapper that allows nested path retrieval using 
+    the division (/) operator and deep-merging using the bitwise OR (|) operator.
+    """
+    def __init__(self, data: Any):
+        self.data = data
 
-    @classmethod
-    def register(cls, name: str):
-        def decorator(func: Callable[[str], str]):
-            cls._transformers[name] = func
-            return func
-        return decorator
+    def __truediv__(self, path: str) -> Any:
+        """
+        Traverse nested dictionaries and lists using slash-separated paths.
+        Example: weaver / 'metadata/users/0/name'
+        """
+        if not isinstance(path, str) or not path:
+            return self
 
-    @classmethod
-    def sanitize(cls, text: str, pipeline: Optional[List[str]] = None) -> str:
-        active_steps = pipeline or list(cls._transformers.keys())
-        for step in active_steps:
-            if step in cls._transformers:
-                text = cls._transformers[step](text)
-        return text
+        parts = [int(p) if p.isdigit() else p for p in path.strip('/').split('/')]
+        current = self.data
 
+        for part in parts:
+            try:
+                if isinstance(current, list) and isinstance(part, int):
+                    current = current[part]
+                elif isinstance(current, dict):
+                    current = current[part]
+                else: 
+                    return None
+            except (IndexError, KeyError, TypeError, ValueError):
+                return None
 
-@OutputSanitizer.register("strip_ansi")
-def _strip_ansi(text: str) -> str:
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    return ansi_escape.sub('', text)
+        if isinstance(current, (dict, list)):
+            return FuzzyDataWeaver(current)
+        return current
 
+    def __or__(self, other: "FuzzyDataWeaver") -> "FuzzyDataWeaver":
+        """Deep-merges two structures, aligning lists index-wise if overlapping."""
+        if not isinstance(other, FuzzyDataWeaver):
+            return self
+        return FuzzyDataWeaver(self._deep_merge(self.data, other.data))
 
-@OutputSanitizer.register("normalize_whitespace")
-def _normalize_whitespace(text: str) -> str:
-    return re.sub(r'[ \t]+', ' ', text).strip()
+    def _deep_merge(self, left: Any, right: Any) -> Any:
+        if isinstance(left, dict) and isinstance(right, dict):
+            merged = dict(left)
+            for key, val in right.items():
+                if key in merged:
+                    merged[key] = self._deep_merge(merged[key], val)
+                else:
+                    merged[key] = val
+            return merged
+        
+        if isinstance(left, list) and isinstance(right, list):
+            merged_list = []
+            for i in range(max(len(left), len(right))):
+                if i < len(left) and i < len(right):
+                    merged_list.append(self._deep_merge(left[i], right[i]))
+                elif i < len(left):
+                    merged_list.append(left[i])
+                else:
+                    merged_list.append(right[i])
+            return merged_list
 
+        return right if right is not None else left
 
-@OutputSanitizer.register("truncate_lines")
-def _truncate_lines(text: str) -> str:
-    max_len = 80
-    lines = text.splitlines()
-    return "\n".join(
-        line[: max_len - 3] + "..." if len(line) > max_len else line
-        for line in lines
-    )
-
-
-def format_cli_stream(stream_data: str, cleanup_pipeline: Optional[List[str]] = None) -> str:
-    """Entrypoint helper to clean and structure raw CLI streams."""
-    pipeline = cleanup_pipeline or ["strip_ansi", "normalize_whitespace"]
-    return OutputSanitizer.sanitize(stream_data, pipeline=pipeline)
-
-
-def print_wrapped_box(message: str, width: int = 40) -> None:
-    """Unusual visual wrapper helper for status outputs."""
-    border = "+" + "-" * (width - 2) + "+"
-    cleaned = format_cli_stream(message)
-    print(border)
-    chunk_size = width - 4
-    for i in range(0, len(cleaned), chunk_size):
-        line = cleaned[i:i + chunk_size]
-        print(f"| {line.ljust(chunk_size)} |")
-    print(border)
+    def unwrap(self) -> Any:
+        """Returns the raw underlying data structure."""
+        return self.data
