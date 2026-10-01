@@ -1,53 +1,50 @@
-import sys
-from typing import Callable, Generator
+from typing import Callable, Iterator, TypeVar, Generic, Iterable
 
-class Rule:
-    def __init__(self, predicate: Callable[[str], bool], error_msg: str):
-        self.predicate = predicate
-        self.error_msg = error_msg
+I = TypeVar("I")
+O = TypeVar("O")
 
-    def __and__(self, other: "Rule") -> "Rule":
-        return Rule(
-            lambda x: self.predicate(x) and other.predicate(x),
-            f"{self.error_msg} & {other.error_msg}"
-        )
+# Creative type alias representing a stream transformer function
+StreamOp = Callable[[Iterable[I]], Iterator[O]]
 
-    def validate(self, value: str) -> tuple[bool, str]:
-        is_valid = self.predicate(value)
-        return is_valid, "" if is_valid else self.error_msg
+class StreamPipeline(Generic[I]):
+    """A fluid pipeline for transforming CLI output sequences creatively.
 
-is_not_empty = Rule(lambda s: bool(s and s.strip()), "input cannot be empty")
-is_alphanumeric = Rule(lambda s: s.strip().isalnum(), "must be alphanumeric")
-is_safe_length = Rule(lambda s: 3 <= len(s.strip()) <= 30, "length must be 3-30 chars")
+    Supports chaining stream operations using the custom `>>` operator to defer
+    execution until collection, keeping the memory footprint low.
+    """
 
-COMMAND_VALIDATOR = is_not_empty & is_alphanumeric & is_safe_length
+    def __init__(self, data: Iterable[I]) -> None:
+        """Initializes the pipeline with a lazy iterable source."""
+        self._data: Iterable[I] = data
 
-def process_stream(source: Generator[str, None, None]) -> None:
-    """Main processing loop using combined rule validators."""
-    print("=== CLI Helper 92 Interactive Processor ===")
-    print("Type 'exit' or 'quit' to terminate.")
+    def __rshift__(self, operator: StreamOp[I, O]) -> "StreamPipeline[O]":
+        """Applies a StreamOp stage to the current pipeline lazily.
 
-    for raw_input in source:
-        cleaned = raw_input.strip()
-        if cleaned.lower() in {"exit", "quit"}:
-            print("Shutting down processor.")
-            break
+        Args:
+            operator: A generator-function transforming Iterable[I] to Iterator[O].
+        """
+        return StreamPipeline(operator(self._data))
 
-        valid, err = COMMAND_VALIDATOR.validate(cleaned)
-        if not valid:
-            print(f"[REJECTED] {err}", file=sys.stderr)
-            continue
+    def consume(self, sep: str = "\n") -> str:
+        """Resolves the pipeline and collapses it into a single formatted string."
 
-        checksum = sum(ord(c) for c in cleaned) % 92
-        print(f"[PROCESSED] Command: '{cleaned}' | Token-ID: #92-{checksum:02d}")
+        Returns:
+            A single joined string representing the evaluated sequence.
+        """
+        return sep.join(str(item) for item in self._data)
 
-def stdin_generator() -> Generator[str, None, None]:
-    while True:
-        try:
-            yield input("cli-helper> ")
-        except (KeyboardInterrupt, EOFError):
-            print("\nSession terminated.")
-            return
 
-if __name__ == "__main__":
-    process_stream(stdin_generator())
+def prefix_tag(tag: str) -> StreamOp[str, str]:
+    """Curried stream transformer that prefixes each text item with a styled tag."""
+    def _prefix(stream: Iterable[str]) -> Iterator[str]:
+        for text in stream:
+            yield f"[{tag.upper()}] {text}"
+    return _prefix
+
+
+def truncate_elements(limit: int) -> StreamOp[str, str]:
+    """Truncates string items to a maximum length, appending an ellipsis if exceeded."""
+    def _truncate(stream: Iterable[str]) -> Iterator[str]:
+        for text in stream:
+            yield text[:limit] + "..." if len(text) > limit else text
+    return _truncate
