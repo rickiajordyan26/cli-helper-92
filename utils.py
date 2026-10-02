@@ -1,43 +1,43 @@
-import functools
-from typing import Any, Callable, Iterable, TypeVar, Dict
+from difflib import get_close_matches
+from typing import Any, Union
 
-T = TypeVar('T')
 
-class DataPipeline:
-    """A whimsical data processing chain using functional currying."""
+class FluentData:
+    """Wrapper for dicts/lists allowing division-based path traversal and fuzzy key matching."""
+
     def __init__(self, data: Any):
-        self._data = data
+        self._data = data._data if isinstance(data, FluentData) else data
 
-    def apply(self, func: Callable[[Any], Any]) -> 'DataPipeline':
-        self._data = func(self._data)
-        return self
+    def __truediv__(self, key: Union[str, int]) -> "FluentData":
+        """Traverse nested structures using the '/' operator with fallback fuzzy matching."""
+        if isinstance(self._data, dict):
+            if key in self._data:
+                return FluentData(self._data[key])
 
-    def result(self) -> Any:
+            if isinstance(key, str):
+                string_keys = [k for k in self._data.keys() if isinstance(k, str)]
+                matches = get_close_matches(key, string_keys, n=1, cutoff=0.5)
+                if matches:
+                    return FluentData(self._data[matches[0]])
+
+            raise KeyError(f"Key '{key}' not found (even with fuzzy matching)")
+
+        if isinstance(self._data, (list, tuple)):
+            try:
+                return FluentData(self._data[int(key)])
+            except (ValueError, IndexError):
+                raise IndexError(f"Invalid index or path segment '{key}'")
+
+        raise TypeError(f"Cannot traverse leaf node of type {type(self._data).__name__}")
+
+    def unwrap(self) -> Any:
+        """Return the unwrapped Python data structure."""
         return self._data
 
-def compose(*funcs: Callable) -> Callable:
-    """Functional pipe composition for data transformation."""
-    return lambda x: functools.reduce(lambda acc, f: f(acc), funcs, x)
+    def __repr__(self) -> str:
+        return f"FluentData({self._data!r})"
 
-def deep_extract(obj: Dict, path: str, default: Any = None) -> Any:
-    """Recursive key retrieval with dot-notation support."""
-    keys = path.split('.')
-    for key in keys:
-        if isinstance(obj, dict): 
-            obj = obj.get(key, default)
-        else:
-            return default
-    return obj
 
-def batch_process(items: Iterable[T], size: int) -> Iterable[list[T]]:
-    """Memory-efficient batching of data chunks."""
-    it = iter(items)
-    while True:
-        batch = []
-        try:
-            for _ in range(size):
-                batch.append(next(it))
-            yield batch
-        except StopIteration:
-            if batch: yield batch
-            break
+def fluid(data: Any) -> FluentData:
+    """Entrypoint to wrap dictionary/list into FluentData."""
+    return FluentData(data)
