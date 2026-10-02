@@ -1,48 +1,42 @@
-from typing import Any, Callable
+import functools
+import time
+import collections
 
+class PerformanceOptimizer:
+    def __init__(self, cache_limit=128):
+        self.cache_limit = cache_limit
+        self._memo = {}
+        self._hits = collections.Counter()
 
-class DataStream:
-    """Creative pipeline wrapper for flexible dictionary and list transformations."""
+    def fast_track(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            key = (func.__name__, args, frozenset(kwargs.items()))
+            if key in self._memo:
+                self._hits[key] += 1
+                return self._memo[key]
+            
+            result = func(*args, **kwargs)
+            
+            if len(self._memo) >= self.cache_limit:
+                lru_key = self._hits.most_common()[-1][0]
+                del self._memo[lru_key]
+                del self._hits[lru_key]
+            
+            self._memo[key] = result
+            self._hits[key] = 1
+            return result
+        return wrapper
 
-    def __init__(self, data: Any):
-        self._data = data
+def heavy_computation(n):
+    time.sleep(0.1)
+    return sum(i * i for i in range(n))
 
-    @property
-    def value(self) -> Any:
-        return self._data
+optimizer = PerformanceOptimizer(cache_limit=64)
+optimized_compute = optimizer.fast_track(heavy_computation)
 
-    def __or__(self, func: Callable[[Any], Any]) -> "DataStream":
-        """Pipe data into a transforming function or item-wise map."""
-        if isinstance(self._data, list) and not getattr(func, "__is_aggregate__", False):
-            return DataStream([func(item) for item in self._data])
-        return DataStream(func(self._data))
+def process_batch(data_points):
+    return [optimized_compute(n) for n in data_points]
 
-    def __matmul__(self, path: str) -> "DataStream":
-        """Extract nested key or index using @ syntax ('user.profile.id')."""
-        current = self._data
-        for key in path.split("."):
-            if isinstance(current, dict):
-                current = current.get(key)
-            elif isinstance(current, (list, tuple)) and key.isdigit():
-                idx = int(key)
-                current = current[idx] if 0 <= idx < len(current) else None
-            else:
-                current = None
-            if current is None:
-                break
-        return DataStream(current)
-
-    def __repr__(self) -> str:
-        return f"DataStream({repr(self._data)})"
-
-
-def flatten_keys(data: dict, prefix: str = "", sep: str = ".") -> dict:
-    """Recursively flatten nested dictionary keys."""
-    items = []
-    for k, v in data.items():
-        new_key = f"{prefix}{sep}{k}" if prefix else str(k)
-        if isinstance(v, dict):
-            items.extend(flatten_keys(v, new_key, sep=sep).items())
-        else:
-            items.append((new_key, v))
-    return dict(items)
+if __name__ == '__main__':
+    print(process_batch([1000, 2000, 1000]))
