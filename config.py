@@ -1,50 +1,37 @@
+import json
 import os
-from typing import Any, Dict, Callable
+from pathlib import Path
+from typing import Any, Dict
 
-class EnvDefault:
-    """Descriptor that resolves values from environment variables or fallbacks dynamically."""
-    def __init__(self, default: Any, cast_type: type = str):
-        self.default = default
-        self.cast_type = cast_type
-        self.name = ""
+class ConfigLoader:
+    def __init__(self, path: str = 'config.json', defaults: Dict[str, Any] = None):
+        self.path = Path(path)
+        self.defaults = defaults or {}
+        self.data = self._load()
 
-    def __set_name__(self, owner: Any, name: str):
-        self.name = name
+    def _load(self) -> Dict[str, Any]:
+        if not self.path.exists():
+            return self.defaults
+        try:
+            with open(self.path, 'r') as f:
+                loaded = json.load(f)
+                return {**self.defaults, **loaded}
+        except (json.JSONDecodeError, IOError):
+            return self.defaults
 
-    def __get__(self, instance: Any, owner: Any) -> Any:
-        env_key = f"CLI_HELPER_{self.name.upper()}"
-        val = os.environ.get(env_key)
-        if val is not None:
-            try:
-                if self.cast_type is bool:
-                    return val.lower() in ("true", "1", "yes", "on")
-                return self.cast_type(val)
-            except (ValueError, TypeError):
-                pass
+    def get(self, key: str, fallback: Any = None) -> Any:
+        return self.data.get(key, fallback)
 
-        resolved = self.default() if callable(self.default) else self.default
-        if resolved is not None and not isinstance(resolved, self.cast_type):
-            return self.cast_type(resolved)
-        return resolved
+    def __getitem__(self, key: str) -> Any:
+        return self.data[key]
 
-class Config:
-    """Configuration schema defining defaults with environment variable overrides."""
-    DEBUG = EnvDefault(False, bool)
-    PORT = EnvDefault(8080, int)
-    APP_DIR = EnvDefault(os.getcwd, str)
-    API_VERSION = EnvDefault("v1", str)
+    def __getattr__(self, name: str) -> Any:
+        return self.data.get(name)
 
-    @classmethod
-    def load_from_dict(cls, data: Dict[str, Any]):
-        """Injects external dictionary values into environment for dynamic reloading."""
-        for key, value in data.items():
-            os.environ[f"CLI_HELPER_{key.upper()}"] = str(value)
+    def save(self):
+        with open(self.path, 'w') as f:
+            json.dump(self.data, f, indent=4)
 
-    @classmethod
-    def export(cls) -> Dict[str, Any]:
-        """Exports all resolved configuration values as a flat dictionary."""
-        return {
-            key: getattr(cls, key)
-            for key, val in cls.__dict__.items()
-            if isinstance(val, EnvDefault)
-        }
+    def update(self, **kwargs):
+        self.data.update(kwargs)
+        self.save()
