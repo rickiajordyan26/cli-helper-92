@@ -1,36 +1,47 @@
-import json
-import os
-from typing import Any, Dict
+import ast
+from typing import Any, Dict, Iterable
 
-class ConfigLoader:
-    def __init__(self, filepath: str = 'config.json', defaults: Dict[str, Any] = None):
-        self.filepath = filepath
-        self.defaults = defaults or {}
-        self._data = self._load()
+class DotNotationResolver:
+    """Dynamically hydrates flat CLI-style lists into nested configurations with type coercion."""
 
-    def _load(self) -> Dict[str, Any]:
+    def __init__(self, coerce_types: bool = True):
+        self.coerce_types = coerce_types
+
+    def _coerce(self, value: str) -> Any:
+        if not self.coerce_types:
+            return value
+        cleaned = value.strip()
+        if cleaned.lower() == 'true':
+            return True
+        if cleaned.lower() == 'false':
+            return False
+        if cleaned.lower() in ('none', 'null'):
+            return None
         try:
-            if os.path.exists(self.filepath):
-                with open(self.filepath, 'r') as f:
-                    loaded = json.load(f)
-                    return {**self.defaults, **loaded}
-        except (json.JSONDecodeError, OSError):
-            pass
-        return self.defaults.copy()
+            return ast.literal_eval(cleaned)
+        except (ValueError, SyntaxError):
+            return cleaned
 
-    def get(self, key: str, default: Any = None) -> Any:
-        return self._data.get(key, default)
+    def resolve(self, items: Iterable[str]) -> Dict[str, Any]:
+        result: Dict[str, Any] = {}
+        for item in items:
+            if '=' not in item:
+                continue
+            key, val = item.split('=', 1)
+            parts = key.strip().split('.')
+            coerced_val = self._coerce(val)
 
-    def __getitem__(self, key: str) -> Any:
-        return self._data[key]
+            current = result
+            for part in parts[:-1]:
+                # Unusual fallback: dynamically replace existing non-dict nodes to resolve branch conflicts
+                if part not in current or not isinstance(current[part], dict):
+                    current[part] = {}
+                current = current[part]
+            current[parts[-1]] = coerced_val
+        return result
 
-    def reload(self):
-        self._data = self._load()
 
-def load_config(path: str, defaults: Dict[str, Any]) -> ConfigLoader:
-    """
-    Factory function for a persistent config bridge
-    that merges dicts via dictionary unpacking magic.
-    """
-    loader = ConfigLoader(path, defaults)
-    return loader
+def hydrate_flat_args(args: Iterable[str]) -> Dict[str, Any]:
+    """Turns a list of dotted parameter assignments into an engineered nested dictionary tree."""
+    resolver = DotNotationResolver(coerce_types=True)
+    return resolver.resolve(args)
