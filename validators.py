@@ -1,42 +1,36 @@
-import re
+import functools
+import logging
+from typing import Callable, Any, TypeVar, ParamSpec
 
-class InputValidator:
-    """Chainable dynamic validation logic for CLI inputs."""
-    def __init__(self, value):
-        self.value = value
-        self.errors = []
+P = ParamSpec('P')
+R = TypeVar('R')
 
-    def must_match(self, pattern, message="Invalid format"):
-        if not re.match(pattern, str(self.value)):
-            self.errors.append(message)
-        return self
+class ValidationError(Exception):
+    pass
 
-    def range(self, min_val, max_val, message="Out of bounds"):
-        try:
-            if not (min_val <= float(self.value) <= max_val):
-                self.errors.append(message)
-        except (ValueError, TypeError):
-            self.errors.append("Numeric conversion failed")
-        return self
+def robust_validator(default_fallback: Any = None) -> Callable[[Callable[P, R]], Callable[P, R | Any]]:
+    def decorator(func: Callable[P, R]) -> Callable[P, R | Any]:
+        @functools.wraps(func)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R | Any:
+            try:
+                return func(*args, **kwargs)
+            except (TypeError, ValueError, AttributeError, KeyError) as e:
+                logging.error(f'Edge case detected in {func.__name__}: {e}')
+                if default_fallback is not None:
+                    return default_fallback
+                raise ValidationError(f'Invalid state in {func.__name__}') from e
+        return wrapper
+    return decorator
 
-    def is_valid(self):
-        return len(self.errors) == 0
+@robust_validator(default_fallback=False)
+def is_non_empty_string(value: Any) -> bool:
+    if not isinstance(value, str):
+        raise TypeError('Not a string')
+    return len(value.strip()) > 0
 
-def validate_cli_input(data, schema):
-    """Process input against schema dictionaries."""
-    results = {}
-    for key, validator_func in schema.items():
-        raw = data.get(key)
-        val = InputValidator(raw)
-        validated = validator_func(val)
-        if not validated.is_valid():
-            raise ValueError(f"Validation error for '{key}': {', '.join(validated.errors)}")
-        results[key] = raw
-    return results
+@robust_validator(default_fallback=0)
+def safe_index_lookup(data: list, index: int) -> Any:
+    return data[index]
 
-# Example usage helper
-def username_rules(v):
-    return v.must_match(r"^[a-z0-9_]{3,16}$", "Username must be 3-16 alphanumeric chars")
-
-def age_rules(v):
-    return v.range(18, 99, "Age must be between 18 and 99")
+def validate_payload(data: dict, required_keys: list[str]) -> bool:
+    return all(is_non_empty_string(data.get(k)) for k in required_keys)
