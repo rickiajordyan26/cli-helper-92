@@ -1,47 +1,42 @@
-import ast
-from typing import Any, Dict, Iterable
+import os
+import json
+from typing import Any, Callable
 
-class DotNotationResolver:
-    """Dynamically hydrates flat CLI-style lists into nested configurations with type coercion."""
+def path_resolver(path: str) -> str:
+    return os.path.abspath(os.path.expanduser(path))
 
-    def __init__(self, coerce_types: bool = True):
-        self.coerce_types = coerce_types
+def memoize_file(filepath: str, func: Callable) -> Any:
+    cache_path = path_resolver(filepath)
+    if os.path.exists(cache_path):
+        with open(cache_path, 'r') as f:
+            return json.load(f)
+    result = func()
+    with open(cache_path, 'w') as f:
+        json.dump(result, f)
+    return result
 
-    def _coerce(self, value: str) -> Any:
-        if not self.coerce_types:
-            return value
-        cleaned = value.strip()
-        if cleaned.lower() == 'true':
-            return True
-        if cleaned.lower() == 'false':
-            return False
-        if cleaned.lower() in ('none', 'null'):
-            return None
-        try:
-            return ast.literal_eval(cleaned)
-        except (ValueError, SyntaxError):
-            return cleaned
+def flatten_dict(d: dict, parent_key: str = '', sep: str = '_') -> dict:
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
 
-    def resolve(self, items: Iterable[str]) -> Dict[str, Any]:
-        result: Dict[str, Any] = {}
-        for item in items:
-            if '=' not in item:
-                continue
-            key, val = item.split('=', 1)
-            parts = key.strip().split('.')
-            coerced_val = self._coerce(val)
+def env_fallback(key: str, default: Any = None) -> Any:
+    return os.environ.get(key, default)
 
-            current = result
-            for part in parts[:-1]:
-                # Unusual fallback: dynamically replace existing non-dict nodes to resolve branch conflicts
-                if part not in current or not isinstance(current[part], dict):
-                    current[part] = {}
-                current = current[part]
-            current[parts[-1]] = coerced_val
-        return result
-
-
-def hydrate_flat_args(args: Iterable[str]) -> Dict[str, Any]:
-    """Turns a list of dotted parameter assignments into an engineered nested dictionary tree."""
-    resolver = DotNotationResolver(coerce_types=True)
-    return resolver.resolve(args)
+def retry_execution(retries: int = 3):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            last_ex = None
+            for _ in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_ex = e
+            raise last_ex
+        return wrapper
+    return decorator
