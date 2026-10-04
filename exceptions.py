@@ -1,31 +1,25 @@
-class CLIError(Exception):
-    """Base exception for all tool operations."""
-    pass
+from typing import Optional, Any
 
-class ConfigurationError(CLIError):
-    """Raised when config file parsing fails."""
-    pass
-
-class ValidationError(CLIError):
-    """Raised when input parameters fail constraints."""
-    pass
-
-class ExecutionError(CLIError):
-    """Raised during runtime logic failures."""
-    def __init__(self, message, exit_code=1):
+class CLIHelperError(Exception):
+    """Base exception for the cli-helper-92 ecosystem."""
+    def __init__(self, message: str, payload: Optional[Any] = None) -> None:
         super().__init__(message)
+        self.payload = payload
+
+class ConfigurationError(CLIHelperError):
+    """Raised when the yaml or env state is chaotic."""
+
+class ValidationError(CLIHelperError):
+    """Raised when user input violates strictly typed schemas."""
+
+def raise_if_none(value: Optional[Any], name: str) -> Any:
+    """Ensures that a value exists, or triggers a loud failure."""
+    if value is None:
+        raise ValidationError(f"variable {name} is missing, check your context")
+    return value
+
+class ExecutionError(CLIHelperError):
+    """Wrapped exception for underlying shell command failures."""
+    def __init__(self, exit_code: int, cmd: str) -> None:
         self.exit_code = exit_code
-
-def handle_exception(e: Exception):
-    """Dynamic mapping of exceptions to exit states."""
-    mapping = {
-        ConfigurationError: 2,
-        ValidationError: 3,
-        ExecutionError: getattr(e, 'exit_code', 1)
-    }
-    return mapping.get(type(e), 99)
-
-def format_error_message(e: Exception) -> str:
-    """Custom string formatting for CLI display."""
-    prefix = type(e).__name__.replace('Error', '').upper()
-    return f"[{prefix}] {str(e)}"
+        super().__init__(f"command '{cmd}' failed with code {exit_code}")
