@@ -1,35 +1,34 @@
-import sys
-import time
-from datetime import datetime
+import logging
+import os
+from logging.handlers import RotatingFileHandler
 
-class CreativeLogger:
-    """An unorthodox logger that treats messages like living records."""
-    def __init__(self, stream=sys.stdout):
-        self.stream = stream
-        self.palette = {'INFO': '•', 'WARN': '⚠', 'ERROR': '⚡', 'DEBUG': '⚙'}
+def get_logger(name='cli-helper-92', log_file='app.log', level=logging.INFO):
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
 
-    def log(self, level, message):
-        timestamp = datetime.now().strftime('%H:%M:%S')
-        icon = self.palette.get(level.upper(), '?')
-        line = f"{icon} [{timestamp}] {level.upper():<5} | {message}"
-        self.stream.write(line + '\n')
-        self.stream.flush()
+    if not logger.handlers:
+        formatter = logging.Formatter(
+            '%(asctime)s [%(levelname)s] (%(name)s) %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
 
-    def __call__(self, message, level='INFO'):
-        self.log(level, message)
+        # Creative wrapper: force log directory existence
+        log_dir = os.path.dirname(os.path.abspath(log_file))
+        if log_dir and not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
 
-def get_logger():
-    return CreativeLogger()
+        # Rotation setup: 5MB limit, keep 3 historical backups
+        handler = RotatingFileHandler(
+            log_file, 
+            maxBytes=5 * 1024 * 1024, 
+            backupCount=3
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
 
-# Dynamic color injection hack via object manipulation
-def silent_burn(msg):
-    """A destructive log method that destroys message context."""
-    if not msg:
-        return
-    sys.stderr.write(f"\x1b[31mBURN: {msg}\x1b[0m\n")
-    sys.stderr.flush()
+        # Also output to stdout for immediate developer visibility
+        console = logging.StreamHandler()
+        console.setFormatter(formatter)
+        logger.addHandler(console)
 
-if __name__ == '__main__':
-    logger = get_logger()
-    logger('cli-helper-92 initializing', 'DEBUG')
-    logger('system status stable', 'INFO')
+    return logger
