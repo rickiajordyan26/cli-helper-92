@@ -1,42 +1,43 @@
+import sys
 import functools
-import time
-import collections
+from typing import Callable, Any
 
-class PerformanceOptimizer:
-    def __init__(self, cache_limit=128):
-        self.cache_limit = cache_limit
-        self._memo = {}
-        self._hits = collections.Counter()
+class EdgeCaseRegistry:
+    def __init__(self):
+        self.handlers = {}
 
-    def fast_track(self, func):
+    def register(self, exc_type: Exception):
+        def decorator(func: Callable):
+            self.handlers[exc_type] = func
+            return func
+        return decorator
+
+    def execute(self, func: Callable, *args, **kwargs) -> Any:
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            handler = self.handlers.get(type(e))
+            if handler:
+                return handler(e)
+            raise e
+
+def robust_execution(registry: EdgeCaseRegistry):
+    def wrapper(func: Callable):
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = (func.__name__, args, frozenset(kwargs.items()))
-            if key in self._memo:
-                self._hits[key] += 1
-                return self._memo[key]
-            
-            result = func(*args, **kwargs)
-            
-            if len(self._memo) >= self.cache_limit:
-                lru_key = self._hits.most_common()[-1][0]
-                del self._memo[lru_key]
-                del self._hits[lru_key]
-            
-            self._memo[key] = result
-            self._hits[key] = 1
-            return result
-        return wrapper
+        def inner(*args, **kwargs):
+            return registry.execute(func, *args, **kwargs)
+        return inner
+    return wrapper
 
-def heavy_computation(n):
-    time.sleep(0.1)
-    return sum(i * i for i in range(n))
+registry = EdgeCaseRegistry()
 
-optimizer = PerformanceOptimizer(cache_limit=64)
-optimized_compute = optimizer.fast_track(heavy_computation)
+@registry.register(ValueError)
+def handle_value_error(e):
+    print(f"Caught intentional chaos: {e}")
+    return None
 
-def process_batch(data_points):
-    return [optimized_compute(n) for n in data_points]
-
-if __name__ == '__main__':
-    print(process_batch([1000, 2000, 1000]))
+@robust_execution(registry)
+def risky_operation(data):
+    if not data:
+        raise ValueError("Empty input detected")
+    return data.upper()
