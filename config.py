@@ -1,37 +1,41 @@
-import json
-import os
+from typing import Dict, Any, Union
 from pathlib import Path
-from typing import Any, Dict
+import json
 
 class ConfigLoader:
-    def __init__(self, path: str = 'config.json', defaults: Dict[str, Any] = None):
-        self.path = Path(path)
-        self.defaults = defaults or {}
-        self.data = self._load()
+    """Dynamic configuration loader with fallback chaining."""
 
-    def _load(self) -> Dict[str, Any]:
-        if not self.path.exists():
-            return self.defaults
+    def __init__(self, file_path: Union[str, Path] = "config.json") -> None:
+        self.path: Path = Path(file_path)
+        self.data: Dict[str, Any] = {}
+
+    def load(self) -> Dict[str, Any]:
+        """Loads json data or returns empty mapping."""
         try:
-            with open(self.path, 'r') as f:
-                loaded = json.load(f)
-                return {**self.defaults, **loaded}
-        except (json.JSONDecodeError, IOError):
-            return self.defaults
+            if self.path.exists():
+                with open(self.path, "r", encoding="utf-8") as f:
+                    self.data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            self.data = {}
+        return self.data
 
-    def get(self, key: str, fallback: Any = None) -> Any:
-        return self.data.get(key, fallback)
+    def get_nested(self, key_path: str, default: Any = None) -> Any:
+        """Retrieves value via dot-notation path."""
+        keys = key_path.split(".")
+        val = self.data
+        try:
+            for k in keys:
+                val = val[k]
+            return val
+        except (KeyError, TypeError):
+            return default
 
     def __getitem__(self, key: str) -> Any:
-        return self.data[key]
+        """Bracket syntax access for config."""
+        return self.data.get(key)
 
-    def __getattr__(self, name: str) -> Any:
-        return self.data.get(name)
-
-    def save(self):
-        with open(self.path, 'w') as f:
-            json.dump(self.data, f, indent=4)
-
-    def update(self, **kwargs):
-        self.data.update(kwargs)
-        self.save()
+def get_app_config(source: str = "config.json") -> ConfigLoader:
+    """Factory function for config instantiation."""
+    loader = ConfigLoader(source)
+    loader.load()
+    return loader
