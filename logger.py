@@ -1,29 +1,30 @@
 import logging
-import os
 from logging.handlers import RotatingFileHandler
+import os
 
-class CreativeLogger:
-    def __init__(self, name='cli-helper-92', path='logs/app.log'):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(logging.DEBUG)
-        
+def setup_logger(name: str = 'cli-helper-92', log_file: str = 'app.log'):
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+
+    if not logger.handlers:
         formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(filename)s:%(lineno)d | %(message)s'
+            '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
         )
 
-        rotator = RotatingFileHandler(
-            path, maxBytes=1024 * 1024 * 5, backupCount=3
+        file_handler = RotatingFileHandler(
+            log_file, 
+            maxBytes=1024 * 1024 * 5, 
+            backupCount=3
         )
-        rotator.setFormatter(formatter)
-        self.logger.addHandler(rotator)
+        file_handler.setFormatter(formatter)
 
-    def get_logger(self):
-        return self.logger
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
 
-def setup_logging():
-    return CreativeLogger().get_logger()
+        logger.addHandler(file_handler)
+        logger.addHandler(console_handler)
 
-if __name__ == '__main__':
-    log = setup_logging()
-    log.info('System initialized with rotating log strategy')
+    return logger
+
+log = setup_logger()
