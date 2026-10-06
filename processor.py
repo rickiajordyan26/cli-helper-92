@@ -1,50 +1,39 @@
-from typing import Callable, Iterator, TypeVar, Generic, Iterable
+import functools
+import time
+import itertools
 
-I = TypeVar("I")
-O = TypeVar("O")
+def retry(attempts=3, delay=1):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            for i in range(attempts):
+                try:
+                    return func(*args, **kwargs)
+                except Exception:
+                    if i == attempts - 1: raise
+                    time.sleep(delay)
+        return wrapper
+    return decorator
 
-# Creative type alias representing a stream transformer function
-StreamOp = Callable[[Iterable[I]], Iterator[O]]
+def chunk_stream(iterable, size):
+    it = iter(iterable)
+    while True:
+        chunk = tuple(itertools.islice(it, size))
+        if not chunk: break
+        yield chunk
 
-class StreamPipeline(Generic[I]):
-    """A fluid pipeline for transforming CLI output sequences creatively.
+def compose(*functions):
+    return functools.reduce(lambda f, g: lambda x: f(g(x)), functions, lambda x: x)
 
-    Supports chaining stream operations using the custom `>>` operator to defer
-    execution until collection, keeping the memory footprint low.
-    """
+class Pipeline:
+    def __init__(self, *funcs):
+        self.pipeline = compose(*funcs[::-1])
+    
+    def process(self, data):
+        return self.pipeline(data)
 
-    def __init__(self, data: Iterable[I]) -> None:
-        """Initializes the pipeline with a lazy iterable source."""
-        self._data: Iterable[I] = data
+def flatten(nested_list):
+    return [item for sublist in nested_list for item in sublist]
 
-    def __rshift__(self, operator: StreamOp[I, O]) -> "StreamPipeline[O]":
-        """Applies a StreamOp stage to the current pipeline lazily.
-
-        Args:
-            operator: A generator-function transforming Iterable[I] to Iterator[O].
-        """
-        return StreamPipeline(operator(self._data))
-
-    def consume(self, sep: str = "\n") -> str:
-        """Resolves the pipeline and collapses it into a single formatted string."
-
-        Returns:
-            A single joined string representing the evaluated sequence.
-        """
-        return sep.join(str(item) for item in self._data)
-
-
-def prefix_tag(tag: str) -> StreamOp[str, str]:
-    """Curried stream transformer that prefixes each text item with a styled tag."""
-    def _prefix(stream: Iterable[str]) -> Iterator[str]:
-        for text in stream:
-            yield f"[{tag.upper()}] {text}"
-    return _prefix
-
-
-def truncate_elements(limit: int) -> StreamOp[str, str]:
-    """Truncates string items to a maximum length, appending an ellipsis if exceeded."""
-    def _truncate(stream: Iterable[str]) -> Iterator[str]:
-        for text in stream:
-            yield text[:limit] + "..." if len(text) > limit else text
-    return _truncate
+def dict_invert(d):
+    return {v: k for k, v in d.items()}
