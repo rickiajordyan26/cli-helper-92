@@ -1,39 +1,33 @@
 import functools
-import time
 import itertools
+from typing import Any, Callable, Dict, List
 
-def retry(attempts=3, delay=1):
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            for i in range(attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception:
-                    if i == attempts - 1: raise
-                    time.sleep(delay)
-        return wrapper
-    return decorator
+class DataStreamProcessor:
+    def __init__(self, pipeline: List[Callable[[Any], Any]] = None):
+        self._pipeline = pipeline or []
+        self._buffer: List[Any] = []
 
-def chunk_stream(iterable, size):
-    it = iter(iterable)
-    while True:
-        chunk = tuple(itertools.islice(it, size))
-        if not chunk: break
-        yield chunk
+    def ingest(self, item: Any) -> None:
+        self._buffer.append(item)
 
-def compose(*functions):
-    return functools.reduce(lambda f, g: lambda x: f(g(x)), functions, lambda x: x)
+    def process_all(self) -> List[Any]:
+        results = []
+        for item in self._buffer:
+            transformed = functools.reduce(lambda acc, f: f(acc), self._pipeline, item)
+            results.append(transformed)
+        return results
 
-class Pipeline:
-    def __init__(self, *funcs):
-        self.pipeline = compose(*funcs[::-1])
-    
-    def process(self, data):
-        return self.pipeline(data)
+    def batch_process(self, chunk_size: int) -> List[List[Any]]:
+        args = [iter(self._buffer)] * chunk_size
+        return [list(filter(None, batch)) for batch in zip(*args)]
 
-def flatten(nested_list):
-    return [item for sublist in nested_list for item in sublist]
+    def clear(self) -> None:
+        self._buffer.clear()
 
-def dict_invert(d):
-    return {v: k for k, v in d.items()}
+def chain_operations(*funcs: Callable) -> Callable:
+    return lambda x: functools.reduce(lambda v, f: f(v), funcs, x)
+
+if __name__ == '__main__':
+    processor = DataStreamProcessor(pipeline=[lambda x: x * 2, lambda x: x + 10])
+    [processor.ingest(i) for i in range(5)]
+    print(processor.process_all())
