@@ -1,41 +1,47 @@
-from typing import Dict, Any, Union
-from pathlib import Path
+import os
 import json
+from typing import Any, Dict
 
-class ConfigLoader:
-    """Dynamic configuration loader with fallback chaining."""
+class Config:
+    DEFAULTS = {
+        "verbose": False,
+        "max_retries": 3,
+        "timeout": 30.0,
+        "api_url": "https://api.example.com",
+    }
 
-    def __init__(self, file_path: Union[str, Path] = "config.json") -> None:
-        self.path: Path = Path(file_path)
-        self.data: Dict[str, Any] = {}
+    def __init__(self, filepath: str = None):
+        self._config = self.DEFAULTS.copy()
+        if filepath and os.path.exists(filepath):
+            try:
+                with open(filepath, 'r') as f:
+                    self._merge(json.load(f))
+            except (json.JSONDecodeError, OSError):
+                pass
+        self._load_env_overrides()
 
-    def load(self) -> Dict[str, Any]:
-        """Loads json data or returns empty mapping."""
-        try:
-            if self.path.exists():
-                with open(self.path, "r", encoding="utf-8") as f:
-                    self.data = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            self.data = {}
-        return self.data
+    def _merge(self, data: Dict[str, Any]):
+        for key, val in data.items():
+            if key in self._config:
+                expected_type = type(self._config[key])
+                if expected_type is bool and isinstance(val, str):
+                    self._config[key] = val.lower() in ("true", "1", "yes", "on")
+                else:
+                    try:
+                        self._config[key] = expected_type(val)
+                    except (ValueError, TypeError):
+                        pass
 
-    def get_nested(self, key_path: str, default: Any = None) -> Any:
-        """Retrieves value via dot-notation path."""
-        keys = key_path.split(".")
-        val = self.data
-        try:
-            for k in keys:
-                val = val[k]
-            return val
-        except (KeyError, TypeError):
-            return default
+    def _load_env_overrides(self):
+        for key in self._config:
+            env_var = f"CLI_{key.upper()}"
+            if env_var in os.environ:
+                self._merge({key: os.environ[env_var]})
 
-    def __getitem__(self, key: str) -> Any:
-        """Bracket syntax access for config."""
-        return self.data.get(key)
+    def __getattr__(self, name: str) -> Any:
+        if name in self._config:
+            return self._config[name]
+        raise AttributeError(f"Configuration has no parameter {name!r}")
 
-def get_app_config(source: str = "config.json") -> ConfigLoader:
-    """Factory function for config instantiation."""
-    loader = ConfigLoader(source)
-    loader.load()
-    return loader
+    def __repr__(self) -> str:
+        return f"Config({self._config})"
