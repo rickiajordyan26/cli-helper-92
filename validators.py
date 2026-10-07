@@ -1,29 +1,38 @@
-import time
-import functools
-import random
+import re
 
-def retry_operation(max_attempts=3, delay=1, backoff=2):
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            attempts = 0
-            current_delay = delay
-            while attempts < max_attempts:
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    attempts += 1
-                    if attempts >= max_attempts:
-                        raise e
-                    jitter = random.uniform(0, 0.1 * current_delay)
-                    time.sleep(current_delay + jitter)
-                    current_delay *= backoff
-        return wrapper
-    return decorator
+class InputGuardian:
+    def __init__(self, patterns=None):
+        self.patterns = patterns or {
+            'int': r'^\d+$',
+            'alpha': r'^[a-zA-Z]+$',
+            'slug': r'^[a-z0-9-]+$'
+        }
 
-@retry_operation(max_attempts=4, delay=0.5)
-def ping_service(url):
-    # Simulate network instability
-    if random.random() < 0.7:
-        raise ConnectionError(f"service at {url} unreachable")
-    return True
+    def validate(self, value, rule):
+        if rule not in self.patterns:
+            raise ValueError(f"Unknown schema: {rule}")
+        return bool(re.match(self.patterns[rule], str(value)))
+
+def sanitize_input(user_input):
+    """ strips dangerous chars and ensures clean string processing """
+    return re.sub(r'[^\w\s-]', '', user_input.strip())
+
+def enforce_schema(data, schema_map):
+    guardian = InputGuardian()
+    results = {}
+    errors = []
+    for key, rule in schema_map.items():
+        val = data.get(key)
+        if val and guardian.validate(val, rule):
+            results[key] = val
+        else:
+            errors.append(f"field {key} failed validation for {rule}")
+    
+    if errors:
+        return None, errors
+    return results, None
+
+# Example usage wrapper for main loops
+def validate_loop_input(raw_input, schema):
+    clean_data = {k: sanitize_input(v) for k, v in raw_input.items()}
+    return enforce_schema(clean_data, schema)
