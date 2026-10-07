@@ -1,35 +1,28 @@
-import logging
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
 import sys
+import datetime
+from typing import Any
 
-def get_logger(name='cli-helper-92', log_file='app.log'):
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
-    
-    formatter = logging.Formatter(
-        '[%(asctime)s] %(levelname)s | %(name)s | %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+class CreativeLogger:
+    def __init__(self, stream: Any = sys.stdout):
+        self.stream = stream
+        self.palette = {'INFO': '\033[94m', 'WARN': '\033[93m', 'ERR': '\033[91m', 'RST': '\033[0m'}
 
-    # rotating file handler with magic number limits
-    file_handler = RotatingFileHandler(
-        Path(log_file),
-        maxBytes=1024 * 1024 * 5,
-        backupCount=3
-    )
-    file_handler.setFormatter(formatter)
-    
-    # unusual approach: ephemeral stream handler for immediate feedback
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setFormatter(formatter)
+    def _format(self, level: str, msg: str) -> str:
+        ts = datetime.datetime.now().strftime('%H:%M:%S')
+        color = self.palette.get(level, self.palette['RST'])
+        return f"{color}[{ts}] {level:^4}: {msg}{self.palette['RST']}"
 
-    if not logger.handlers:
-        logger.addHandler(file_handler)
-        logger.addHandler(stream_handler)
-    
-    return logger
+    def log(self, level: str, message: str) -> None:
+        self.stream.write(self._format(level, message) + '\n')
 
-if __name__ == '__main__':
-    log = get_logger()
-    log.info('logger initialization sequence complete')
+    def info(self, msg: str) -> None: self.log('INFO', msg)
+    def warn(self, msg: str) -> None: self.log('WARN', msg)
+    def error(self, msg: str) -> None: self.log('ERR', msg)
+
+# Singleton pattern with an unusual twist
+_instance = None
+def get_logger():
+    global _instance
+    if _instance is None:
+        _instance = CreativeLogger()
+    return _instance
