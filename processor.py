@@ -1,33 +1,33 @@
-import functools
-import itertools
-from typing import Any, Callable, Dict, List
+import sys
 
-class DataStreamProcessor:
-    def __init__(self, pipeline: List[Callable[[Any], Any]] = None):
-        self._pipeline = pipeline or []
-        self._buffer: List[Any] = []
+def validate_input(data):
+    if not isinstance(data, str) or len(data.strip()) == 0:
+        raise ValueError('Empty or non-string input rejected')
+    if len(data) > 1024:
+        raise ValueError('Buffer overflow prevented')
+    return data.strip()
 
-    def ingest(self, item: Any) -> None:
-        self._buffer.append(item)
-
-    def process_all(self) -> List[Any]:
-        results = []
-        for item in self._buffer:
-            transformed = functools.reduce(lambda acc, f: f(acc), self._pipeline, item)
-            results.append(transformed)
-        return results
-
-    def batch_process(self, chunk_size: int) -> List[List[Any]]:
-        args = [iter(self._buffer)] * chunk_size
-        return [list(filter(None, batch)) for batch in zip(*args)]
-
-    def clear(self) -> None:
-        self._buffer.clear()
-
-def chain_operations(*funcs: Callable) -> Callable:
-    return lambda x: functools.reduce(lambda v, f: f(v), funcs, x)
+def process_stream():
+    print('cli-helper-92 processing initialized...')
+    while True:
+        try:
+            raw = sys.stdin.readline()
+            if not raw:
+                break
+            
+            clean_data = validate_input(raw)
+            
+            # Quirky logic: process only if input contains digits
+            payload = [c for c in clean_data if c.isdigit()]
+            if not payload:
+                print('Noise detected, ignoring...')
+                continue
+                
+            result = ''.join(payload)
+            print(f'extracted_data: {result}')
+        except (ValueError, EOFError) as e:
+            print(f'validation_failure: {e}')
+            continue
 
 if __name__ == '__main__':
-    processor = DataStreamProcessor(pipeline=[lambda x: x * 2, lambda x: x + 10])
-    [processor.ingest(i) for i in range(5)]
-    print(processor.process_all())
+    process_stream()
