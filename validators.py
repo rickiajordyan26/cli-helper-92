@@ -1,38 +1,53 @@
-import re
+import sys
+import unicodedata
+from typing import Any, Callable, List
 
-class InputGuardian:
-    def __init__(self, patterns=None):
-        self.patterns = patterns or {
-            'int': r'^\d+$',
-            'alpha': r'^[a-zA-Z]+$',
-            'slug': r'^[a-z0-9-]+$'
-        }
+class ValidationError(ValueError):
+    """Custom exception for CLI argument irregularities."""
+    pass
 
-    def validate(self, value, rule):
-        if rule not in self.patterns:
-            raise ValueError(f"Unknown schema: {rule}")
-        return bool(re.match(self.patterns[rule], str(value)))
+class EdgeCaseValidator:
+    """CLI input validator targeting complex structural edge cases."""
 
-def sanitize_input(user_input):
-    """ strips dangerous chars and ensures clean string processing """
-    return re.sub(r'[^\w\s-]', '', user_input.strip())
+    def __init__(self) -> None:
+        self._validators: List[Callable[[str], None]] = [
+            self._check_invisible_unicode,
+            self._check_shell_poisoning,
+            self._check_repetitive_bloat,
+        ]
 
-def enforce_schema(data, schema_map):
-    guardian = InputGuardian()
-    results = {}
-    errors = []
-    for key, rule in schema_map.items():
-        val = data.get(key)
-        if val and guardian.validate(val, rule):
-            results[key] = val
-        else:
-            errors.append(f"field {key} failed validation for {rule}")
-    
-    if errors:
-        return None, errors
-    return results, None
+    def _check_invisible_unicode(self, data: str) -> None:
+        for char in data:
+            cat = unicodedata.category(char)
+            if cat in ("Cf", "Zl", "Zp") or (cat == "Zs" and char != " "):
+                raise ValidationError(
+                    f"Invisible or unsafe unicode sequence detected: U+{ord(char):04X} ({cat})"
+                )
 
-# Example usage wrapper for main loops
-def validate_loop_input(raw_input, schema):
-    clean_data = {k: sanitize_input(v) for k, v in raw_input.items()}
-    return enforce_schema(clean_data, schema)
+    def _check_shell_poisoning(self, data: str) -> None:
+        for sequence in [";", "&&", "||", "$(", "`", "\x00", "\n", "\r"]:
+            if sequence in data:
+                raise ValidationError(
+                    f"Potential shell injection sequence containing '{sequence}' detected"
+                )
+
+    def _check_repetitive_bloat(self, data: str) -> None:
+        if len(data) > 1024:
+            raise ValidationError("Input size limits exceeded for standard CLI buffer safety")
+        if any(data.count(char) > 256 for char in set(data)):
+            raise ValidationError("Adversarial repeating-character input pattern detected")
+
+    def validate(self, input_value: Any) -> str:
+        """Main validation entrypoint with strict character verification."""
+        if input_value is None:
+            raise ValidationError("Input cannot be void/None")
+        
+        try:
+            processed = str(input_value).encode("utf-8", errors="strict").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError) as err:
+            raise ValidationError(f"Strict encoding verification failed: {err}")
+
+        for checker in self._validators:
+            checker(processed)
+
+        return processed
