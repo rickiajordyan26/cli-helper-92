@@ -1,53 +1,53 @@
-import sys
-import unicodedata
-from typing import Any, Callable, List
+import re
+from typing import Any, Callable, List, Tuple
 
-class ValidationError(ValueError):
-    """Custom exception for CLI argument irregularities."""
-    pass
 
-class EdgeCaseValidator:
-    """CLI input validator targeting complex structural edge cases."""
+class Rule:
+    def __init__(self, func: Callable[[Any], bool], msg: str = "Invalid value"):
+        self.func = func
+        self.msg = msg
 
-    def __init__(self) -> None:
-        self._validators: List[Callable[[str], None]] = [
-            self._check_invisible_unicode,
-            self._check_shell_poisoning,
-            self._check_repetitive_bloat,
-        ]
+    def __call__(self, value: Any) -> Tuple[bool, str]:
+        valid = bool(self.func(value))
+        return valid, ("" if valid else self.msg)
 
-    def _check_invisible_unicode(self, data: str) -> None:
-        for char in data:
-            cat = unicodedata.category(char)
-            if cat in ("Cf", "Zl", "Zp") or (cat == "Zs" and char != " "):
-                raise ValidationError(
-                    f"Invisible or unsafe unicode sequence detected: U+{ord(char):04X} ({cat})"
-                )
+    def __or__(self, other: "Rule") -> "Rule":
+        return Rule(
+            lambda v: self(v)[0] or other(v)[0],
+            f"({self.msg} OR {other.msg})",
+        )
 
-    def _check_shell_poisoning(self, data: str) -> None:
-        for sequence in [";", "&&", "||", "$(", "`", "\x00", "\n", "\r"]:
-            if sequence in data:
-                raise ValidationError(
-                    f"Potential shell injection sequence containing '{sequence}' detected"
-                )
+    def __and__(self, other: "Rule") -> "Rule":
+        return Rule(
+            lambda v: self(v)[0] and other(v)[0],
+            f"({self.msg} AND {other.msg})",
+        )
 
-    def _check_repetitive_bloat(self, data: str) -> None:
-        if len(data) > 1024:
-            raise ValidationError("Input size limits exceeded for standard CLI buffer safety")
-        if any(data.count(char) > 256 for char in set(data)):
-            raise ValidationError("Adversarial repeating-character input pattern detected")
 
-    def validate(self, input_value: Any) -> str:
-        """Main validation entrypoint with strict character verification."""
-        if input_value is None:
-            raise ValidationError("Input cannot be void/None")
-        
-        try:
-            processed = str(input_value).encode("utf-8", errors="strict").decode("utf-8")
-        except (UnicodeEncodeError, UnicodeDecodeError) as err:
-            raise ValidationError(f"Strict encoding verification failed: {err}")
+class ValidatorPipeline:
+    def __init__(self, **rules: Rule):
+        self._rules = rules
 
-        for checker in self._validators:
-            checker(processed)
+    def validate(self, **data: Any) -> Tuple[bool, List[str]]:
+        errors = []
+        for key, rule in self._rules.items():
+            if key not in data:
+                errors.append(f"Missing required field: '{key}'")
+                continue
+            ok, err = rule(data[key])
+            if not ok:
+                errors.append(f"Field '{key}': {err}")
+        return len(errors) == 0, errors
 
-        return processed
+
+is_str = Rule(lambda x: isinstance(x, str), "Must be a string")
+is_int = Rule(lambda x: isinstance(x, int) and not isinstance(x, bool), "Must be an integer")
+non_empty = Rule(lambda x: len(str(x).strip()) > 0, "Cannot be empty string")
+is_email = Rule(lambda x: bool(re.match(r"^[^@]+@[^@]+\.[^@]+$", str(x))), "Must be a valid email")
+is_positive = Rule(lambda x: isinstance(x, (int, float)) and x > 0, "Must be positive")
+
+cli_input_validator = ValidatorPipeline(
+    username=is_str & non_empty,
+    email=is_str & is_email,
+    age=is_int & is_positive,
+)
