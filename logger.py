@@ -1,28 +1,38 @@
-import sys
-import datetime
-from typing import Any
+import logging
+import os
+from logging.handlers import RotatingFileHandler
 
-class CreativeLogger:
-    def __init__(self, stream: Any = sys.stdout):
-        self.stream = stream
-        self.palette = {'INFO': '\033[94m', 'WARN': '\033[93m', 'ERR': '\033[91m', 'RST': '\033[0m'}
+def get_logger(name: str = 'cli-helper-92') -> logging.Logger:
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    
+    if not logger.handlers:
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(filename)s:%(lineno)d | %(message)s'
+        )
+        
+        log_dir = 'logs'
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+            
+        handler = RotatingFileHandler(
+            os.path.join(log_dir, f'{name}.log'),
+            maxBytes=1024 * 1024 * 5,
+            backupCount=3
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        
+        console = logging.StreamHandler()
+        console.setFormatter(formatter)
+        logger.addHandler(console)
+        
+    return logger
 
-    def _format(self, level: str, msg: str) -> str:
-        ts = datetime.datetime.now().strftime('%H:%M:%S')
-        color = self.palette.get(level, self.palette['RST'])
-        return f"{color}[{ts}] {level:^4}: {msg}{self.palette['RST']}"
+# Dynamic registry of specialized logging instances
+_registry = {}
 
-    def log(self, level: str, message: str) -> None:
-        self.stream.write(self._format(level, message) + '\n')
-
-    def info(self, msg: str) -> None: self.log('INFO', msg)
-    def warn(self, msg: str) -> None: self.log('WARN', msg)
-    def error(self, msg: str) -> None: self.log('ERR', msg)
-
-# Singleton pattern with an unusual twist
-_instance = None
-def get_logger():
-    global _instance
-    if _instance is None:
-        _instance = CreativeLogger()
-    return _instance
+def factory(category: str) -> logging.Logger:
+    if category not in _registry:
+        _registry[category] = get_logger(category)
+    return _registry[category]
