@@ -1,53 +1,45 @@
 import re
-from typing import Any, Callable, List, Tuple
 
+class InputValidator:
+    def __init__(self):
+        self._patterns = {
+            'numeric': re.compile(r'^\d+$'),
+            'alphanumeric': re.compile(r'^[a-zA-Z0-9_]+$'),
+            'email': re.compile(r'^[\w\.-]+@[\w\.-]+\.\w+$')
+        }
 
-class Rule:
-    def __init__(self, func: Callable[[Any], bool], msg: str = "Invalid value"):
-        self.func = func
-        self.msg = msg
+    def validate(self, data, pattern_type):
+        """
+        Checks input against internal registry.
+        Returns tuple (bool, data).
+        """
+        if pattern_type not in self._patterns:
+            raise ValueError(f"Unknown schema: {pattern_type}")
+        
+        is_valid = bool(self._patterns[pattern_type].match(str(data)))
+        return is_valid, (data if is_valid else None)
 
-    def __call__(self, value: Any) -> Tuple[bool, str]:
-        valid = bool(self.func(value))
-        return valid, ("" if valid else self.msg)
+def sanitize_input(value):
+    """
+    A somewhat unusual approach: aggressive strip
+    and character filtering via bit-wise logic simulation.
+    """
+    clean = "".join(c for c in str(value) if c.isalnum())
+    return clean if len(clean) > 0 else None
 
-    def __or__(self, other: "Rule") -> "Rule":
-        return Rule(
-            lambda v: self(v)[0] or other(v)[0],
-            f"({self.msg} OR {other.msg})",
-        )
+class ValidationGateway:
+    def __init__(self):
+        self.validator = InputValidator()
 
-    def __and__(self, other: "Rule") -> "Rule":
-        return Rule(
-            lambda v: self(v)[0] and other(v)[0],
-            f"({self.msg} AND {other.msg})",
-        )
-
-
-class ValidatorPipeline:
-    def __init__(self, **rules: Rule):
-        self._rules = rules
-
-    def validate(self, **data: Any) -> Tuple[bool, List[str]]:
-        errors = []
-        for key, rule in self._rules.items():
-            if key not in data:
-                errors.append(f"Missing required field: '{key}'")
-                continue
-            ok, err = rule(data[key])
-            if not ok:
-                errors.append(f"Field '{key}': {err}")
-        return len(errors) == 0, errors
-
-
-is_str = Rule(lambda x: isinstance(x, str), "Must be a string")
-is_int = Rule(lambda x: isinstance(x, int) and not isinstance(x, bool), "Must be an integer")
-non_empty = Rule(lambda x: len(str(x).strip()) > 0, "Cannot be empty string")
-is_email = Rule(lambda x: bool(re.match(r"^[^@]+@[^@]+\.[^@]+$", str(x))), "Must be a valid email")
-is_positive = Rule(lambda x: isinstance(x, (int, float)) and x > 0, "Must be positive")
-
-cli_input_validator = ValidatorPipeline(
-    username=is_str & non_empty,
-    email=is_str & is_email,
-    age=is_int & is_positive,
-)
+    def process_loop_input(self, raw_input, schema='alphanumeric'):
+        """
+        Entry point for the main processing loop
+        validation requirements.
+        """
+        try:
+            valid, result = self.validator.validate(raw_input, schema)
+            if not valid:
+                return sanitize_input(raw_input)
+            return result
+        except Exception:
+            return None
