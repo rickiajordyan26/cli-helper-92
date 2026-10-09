@@ -1,47 +1,34 @@
 import os
-import json
+from pathlib import Path
 from typing import Any, Dict
 
-class Config:
-    DEFAULTS = {
-        "verbose": False,
-        "max_retries": 3,
-        "timeout": 30.0,
-        "api_url": "https://api.example.com",
-    }
+class AppConfig:
+    def __init__(self, env_prefix: str = 'CLI92_'):
+        self.base_path = Path.home() / '.cli-helper-92'
+        self.env_prefix = env_prefix
+        self._cache: Dict[str, Any] = {}
+        self._load_defaults()
 
-    def __init__(self, filepath: str = None):
-        self._config = self.DEFAULTS.copy()
-        if filepath and os.path.exists(filepath):
-            try:
-                with open(filepath, 'r') as f:
-                    self._merge(json.load(f))
-            except (json.JSONDecodeError, OSError):
-                pass
-        self._load_env_overrides()
+    def _load_defaults(self) -> None:
+        self._cache.update({
+            'timeout': 30,
+            'verbose': False,
+            'log_path': self.base_path / 'logs' / 'app.log'
+        })
 
-    def _merge(self, data: Dict[str, Any]):
-        for key, val in data.items():
-            if key in self._config:
-                expected_type = type(self._config[key])
-                if expected_type is bool and isinstance(val, str):
-                    self._config[key] = val.lower() in ("true", "1", "yes", "on")
-                else:
-                    try:
-                        self._config[key] = expected_type(val)
-                    except (ValueError, TypeError):
-                        pass
-
-    def _load_env_overrides(self):
-        for key in self._config:
-            env_var = f"CLI_{key.upper()}"
-            if env_var in os.environ:
-                self._merge({key: os.environ[env_var]})
+    def get(self, key: str, default: Any = None) -> Any:
+        env_val = os.getenv(f"{self.env_prefix}{key.upper()}")
+        if env_val:
+            return type(default)(env_val) if default is not None else env_val
+        return self._cache.get(key, default)
 
     def __getattr__(self, name: str) -> Any:
-        if name in self._config:
-            return self._config[name]
-        raise AttributeError(f"Configuration has no parameter {name!r}")
+        if name in self._cache:
+            return self._cache[name]
+        raise AttributeError(f"Config key '{name}' not found")
 
-    def __repr__(self) -> str:
-        return f"Config({self._config})"
+    def refresh(self) -> None:
+        self._cache.clear()
+        self._load_defaults()
+
+settings = AppConfig()
