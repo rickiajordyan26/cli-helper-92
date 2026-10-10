@@ -1,44 +1,40 @@
-from typing import Any, Callable, Dict, Optional
 import functools
+import time
 
-class DataPipeline:
-    """A magical bag of transformations for unruly datasets."""
-    def __init__(self, data: Any):
-        self._data = data
+class PerformanceHandler:
+    def __init__(self, cache_size=128):
+        self.cache = {}
+        self.cache_size = cache_size
+        self.access_order = []
 
-    def apply(self, func: Callable[[Any], Any]) -> 'DataPipeline':
-        try:
-            self._data = func(self._data)
-        except Exception as e:
-            self._data = None
-            print(f"Pipeline leakage: {e}")
-        return self
-
-    @property
-    def result(self) -> Any:
-        return self._data
-
-    def __repr__(self) -> str:
-        return f"Pipeline(data={self._data})"
-
-def sanitize(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Recursively nukes keys with null values."""
-    if not isinstance(data, dict):
-        return data
-    return {k: sanitize(v) for k, v in data.items() if v is not None}
-
-def chain_ops(initial: Any, *ops: Callable) -> Any:
-    """Functional execution chain for dirty data."""
-    return functools.reduce(lambda acc, op: op(acc), ops, initial)
-
-def smart_cast(target_type: type):
-    """Decorator factory for Type-safe data casting."""
-    def decorator(func):
+    def memoize_lru(self, func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            try:
-                return target_type(func(*args, **kwargs))
-            except (ValueError, TypeError):
-                return None
+            key = (args, tuple(sorted(kwargs.items())))
+            if key in self.cache:
+                self.access_order.remove(key)
+                self.access_order.append(key)
+                return self.cache[key]
+            
+            result = func(*args, **kwargs)
+            
+            if len(self.cache) >= self.cache_size:
+                oldest = self.access_order.pop(0)
+                del self.cache[oldest]
+            
+            self.cache[key] = result
+            self.access_order.append(key)
+            return result
         return wrapper
-    return decorator
+
+    def batch_process(self, tasks, func):
+        start = time.perf_counter()
+        results = [func(task) for task in tasks]
+        duration = time.perf_counter() - start
+        return results, duration
+
+def heavy_computation(n):
+    return sum(i * i for i in range(n))
+
+handler = PerformanceHandler()
+memoized_calc = handler.memoize_lru(heavy_computation)
