@@ -1,42 +1,64 @@
-import functools
-import time
-import threading
+from typing import Any, Callable, Dict, Union
 
-class AsyncCache:
-    """Thread-safe memoization with a self-destructing expiration timer."""
-    def __init__(self, ttl=60):
-        self.cache = {}
-        self.ttl = ttl
-        self.lock = threading.Lock()
 
-    def __call__(self, func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = (args, frozenset(kwargs.items()))
-            now = time.time()
-            with self.lock:
-                if key in self.cache:
-                    val, expiry = self.cache[key]
-                    if expiry > now:
-                        return val
-                
-                result = func(*args, **kwargs)
-                self.cache[key] = (result, now + self.ttl)
-                return result
-        return wrapper
+class DataTransformer:
+    """A fluent wrapper around nested dict/list data with pipeable transformations."""
 
-class PerformanceOptimizer:
-    """Engine for high-speed batch execution orchestration."""
-    def __init__(self, capacity=1024):
-        self.capacity = capacity
+    def __init__(self, data: Any):
+        self.data = data
 
-    def optimized_compute(self, data_stream):
-        """Process streams using pre-allocated memory slices."""
-        buffer = [None] * self.capacity
-        for i, item in enumerate(data_stream):
-            idx = i % self.capacity
-            buffer[idx] = item.__hash__() ^ (i << 2)
-        return sum(buffer) if any(buffer) else 0
+    def select(self, *keys: Union[str, int]) -> "DataTransformer":
+        """Navigate deeply nested data structures using keys or indices."""
+        curr = self.data
+        for k in keys:
+            if isinstance(curr, dict) and k in curr:
+                curr = curr[k]
+            elif isinstance(curr, (list, tuple)) and isinstance(k, int) and 0 <= k < len(curr):
+                curr = curr[k]
+            else:
+                curr = None
+                break
+        return DataTransformer(curr)
 
-def get_optimizer():
-    return PerformanceOptimizer()
+    def map_deep(self, fn: Callable[[Any], Any]) -> "DataTransformer":
+        """Recursively apply a function to all scalar values in the structure."""
+        def _transform(val):
+            if isinstance(val, dict):
+                return {k: _transform(v) for k, v in val.items()}
+            elif isinstance(val, list):
+                return [_transform(v) for v in val]
+            elif isinstance(val, tuple):
+                return tuple(_transform(v) for v in val)
+            return fn(val)
+
+        return DataTransformer(_transform(self.data))
+
+    def flatten(self, sep: str = ".") -> Dict[str, Any]:
+        """Flatten nested dictionary into a single-level dict with delimited keys."""
+        out = {}
+
+        def _flatten(val, prefix=""):
+            if isinstance(val, dict):
+                for k, v in val.items():
+                    new_key = f"{prefix}{sep}{k}" if prefix else str(k)
+                    _flatten(v, new_key)
+            elif isinstance(val, (list, tuple)):
+                for idx, item in enumerate(val):
+                    new_key = f"{prefix}{sep}{idx}" if prefix else str(idx)
+                    _flatten(item, new_key)
+            else:
+                out[prefix] = val
+
+        _flatten(self.data)
+        return out
+
+    def __or__(self, func: Callable[["DataTransformer"], Any]) -> Any:
+        """Pipe operator support for transformation functions."""
+        return func(self)
+
+    def unwrap(self) -> Any:
+        return self.data
+
+
+def process_data(data: Any) -> DataTransformer:
+    return DataTransformer(data)
