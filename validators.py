@@ -1,45 +1,38 @@
 import re
+from typing import Any, Callable, Dict, List, Optional
 
 class InputValidator:
-    def __init__(self):
-        self._patterns = {
-            'numeric': re.compile(r'^\d+$'),
-            'alphanumeric': re.compile(r'^[a-zA-Z0-9_]+$'),
-            'email': re.compile(r'^[\w\.-]+@[\w\.-]+\.\w+$')
-        }
+    """Dynamic pipeline of validator functions for CLI input."""
+    def __init__(self, rules: List[Callable[[Any], bool]] = None):
+        self.rules = rules or []
 
-    def validate(self, data, pattern_type):
-        """
-        Checks input against internal registry.
-        Returns tuple (bool, data).
-        """
-        if pattern_type not in self._patterns:
-            raise ValueError(f"Unknown schema: {pattern_type}")
-        
-        is_valid = bool(self._patterns[pattern_type].match(str(data)))
-        return is_valid, (data if is_valid else None)
+    def validate(self, value: Any) -> bool:
+        return all(rule(value) for rule in self.rules)
 
-def sanitize_input(value):
-    """
-    A somewhat unusual approach: aggressive strip
-    and character filtering via bit-wise logic simulation.
-    """
-    clean = "".join(c for c in str(value) if c.isalnum())
-    return clean if len(clean) > 0 else None
+    @staticmethod
+    def is_non_empty(value: str) -> bool:
+        return bool(value and value.strip())
 
-class ValidationGateway:
-    def __init__(self):
-        self.validator = InputValidator()
+    @staticmethod
+    def is_email(value: str) -> bool:
+        pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
+        return bool(re.match(pattern, value))
 
-    def process_loop_input(self, raw_input, schema='alphanumeric'):
-        """
-        Entry point for the main processing loop
-        validation requirements.
-        """
-        try:
-            valid, result = self.validator.validate(raw_input, schema)
-            if not valid:
-                return sanitize_input(raw_input)
-            return result
-        except Exception:
-            return None
+    @staticmethod
+    def is_within_range(min_val: int, max_val: int) -> Callable[[int], bool]:
+        return lambda val: min_val <= val <= max_val
+
+def run_checks(data: Dict[str, Any], schema: Dict[str, InputValidator]) -> Dict[str, bool]:
+    return {key: schema[key].validate(data.get(key)) for key in schema}
+
+def compose_rules(*funcs: Callable) -> List[Callable]:
+    return list(funcs)
+
+if __name__ == '__main__':
+    schema = {
+        'username': InputValidator([InputValidator.is_non_empty]),
+        'age': InputValidator([InputValidator.is_within_range(18, 99)])
+    }
+    payload = {'username': 'dev_user', 'age': 25}
+    results = run_checks(payload, schema)
+    print(f"Validation status: {all(results.values())}")
