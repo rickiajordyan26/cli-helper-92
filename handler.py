@@ -1,40 +1,36 @@
-import functools
 import time
+import functools
+import random
 
-class PerformanceHandler:
-    def __init__(self, cache_size=128):
-        self.cache = {}
-        self.cache_size = cache_size
-        self.access_order = []
-
-    def memoize_lru(self, func):
+def retry_operation(max_attempts=3, delay=1.0, backoff=2.0):
+    def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            key = (args, tuple(sorted(kwargs.items())))
-            if key in self.cache:
-                self.access_order.remove(key)
-                self.access_order.append(key)
-                return self.cache[key]
-            
-            result = func(*args, **kwargs)
-            
-            if len(self.cache) >= self.cache_size:
-                oldest = self.access_order.pop(0)
-                del self.cache[oldest]
-            
-            self.cache[key] = result
-            self.access_order.append(key)
-            return result
+            attempts = 0
+            current_delay = delay
+            while attempts < max_attempts:
+                try:
+                    return func(*args, **kwargs)
+                except (ConnectionError, TimeoutError) as e:
+                    attempts += 1
+                    if attempts >= max_attempts:
+                        raise e
+                    jitter = random.uniform(0, 0.1 * current_delay)
+                    time.sleep(current_delay + jitter)
+                    current_delay *= backoff
         return wrapper
+    return decorator
 
-    def batch_process(self, tasks, func):
-        start = time.perf_counter()
-        results = [func(task) for task in tasks]
-        duration = time.perf_counter() - start
-        return results, duration
+@retry_operation(max_attempts=5, delay=0.5)
+def fetch_remote_data(url):
+    # Simulate unpredictable network stability
+    if random.random() < 0.7:
+        raise ConnectionError('network jitter encountered')
+    return {'status': 'success', 'payload': 'data_092'}
 
-def heavy_computation(n):
-    return sum(i * i for i in range(n))
-
-handler = PerformanceHandler()
-memoized_calc = handler.memoize_lru(heavy_computation)
+if __name__ == '__main__':
+    try:
+        result = fetch_remote_data('https://api.example.com')
+        print(f'Operation success: {result}')
+    except Exception as e:
+        print(f'Operation final failure: {e}')
