@@ -1,33 +1,33 @@
-class CLIError(Exception):
-    """Base exception for cli-helper-92 operations."""
-    def __init__(self, message, code=1):
-        self.code = code
-        super().__init__(f"[{code}] {message}")
+from typing import Any, Optional, Dict
 
-class ConfigError(CLIError):
-    """Raised when configuration loading fails."""
+class DataProcessingError(Exception):
+    """Base exception for data operations in cli-helper-92."""
+    def __init__(self, message: str, context: Optional[Dict[str, Any]] = None):
+        super().__init__(message)
+        self.context = context or {}
+
+class DataTransformationError(DataProcessingError):
+    """Raised when raw data fails to map to required schema."""
     pass
 
-class ValidationError(CLIError):
-    """Raised when input validation fails."""
+class SchemaValidationWarning(Warning):
+    """Non-fatal mismatch encountered during data normalization."""
     pass
 
-def raise_if(condition, message, exception_cls=CLIError, code=400):
-    """Conditional exception raiser for fluid control flow."""
-    if condition:
-        raise exception_cls(message, code)
+def raise_if_empty(data: Any, key: str) -> None:
+    """Sentinel check for required payload keys."""
+    if not data or key not in data or data[key] is None:
+        raise DataProcessingError(
+            f"Missing critical key: {key}",
+            context={"provided_data": str(data)[:50]}
+        )
 
-def catch_or_default(func, default=None):
-    """Decorator pattern for safe execution of operations."""
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except CLIError:
-            return default
-    return wrapper
-
-class ExceptionReporter:
-    """Centralized diagnostic tool for session tracebacks."""
-    @staticmethod
-    def format(exc: Exception) -> str:
-        return f"!! {exc.__class__.__name__}: {str(exc)}"
+def safe_extract(data: Dict, key: str, default: Any = None) -> Any:
+    """Duck-typed getter with structural logging context."""
+    try:
+        return data.get(key, default)
+    except AttributeError:
+        raise DataTransformationError(
+            "Malformed container passed to extractor",
+            context={"type": type(data).__name__}
+        )
