@@ -1,36 +1,50 @@
-import time
-import functools
-import random
+import sys
+from typing import Callable, Any, List, Tuple
 
-def retry_operation(max_attempts=3, delay=1.0, backoff=2.0):
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            attempts = 0
-            current_delay = delay
-            while attempts < max_attempts:
-                try:
-                    return func(*args, **kwargs)
-                except (ConnectionError, TimeoutError) as e:
-                    attempts += 1
-                    if attempts >= max_attempts:
-                        raise e
-                    jitter = random.uniform(0, 0.1 * current_delay)
-                    time.sleep(current_delay + jitter)
-                    current_delay *= backoff
+
+class EdgeCaseGuard:
+    """Resilient decorator catching standard and bizarre CLI execution edge cases."""
+
+    def __init__(self, default_return: Any = None, verbose: bool = False):
+        self.default_return = default_return
+        self.verbose = verbose
+        self.fallbacks: List[Tuple[type, Callable[[BaseException], Any]]] = []
+
+    def register_fallback(self, exc_type: type, recovery_fn: Callable[[BaseException], Any]) -> "EdgeCaseGuard":
+        self.fallbacks.append((exc_type, recovery_fn))
+        return self
+
+    def __call__(self, func: Callable) -> Callable:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                clean_args = [
+                    a.replace("\x00", "") if isinstance(a, str) else a
+                    for a in args
+                ]
+                return func(*clean_args, **kwargs)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except BaseException as exc:
+                for exc_type, handler in self.fallbacks:
+                    if isinstance(exc, exc_type):
+                        return handler(exc)
+                if self.verbose:
+                    sys.stderr.write(f"[CLI Guard] Handled edge case: {type(exc).__name__} -> {exc}\n")
+                return self.default_return
+
         return wrapper
-    return decorator
 
-@retry_operation(max_attempts=5, delay=0.5)
-def fetch_remote_data(url):
-    # Simulate unpredictable network stability
-    if random.random() < 0.7:
-        raise ConnectionError('network jitter encountered')
-    return {'status': 'success', 'payload': 'data_092'}
 
-if __name__ == '__main__':
-    try:
-        result = fetch_remote_data('https://api.example.com')
-        print(f'Operation success: {result}')
-    except Exception as e:
-        print(f'Operation final failure: {e}')
+def safe_cli_runner(
+    action: Callable[..., Any],
+    *args: Any,
+    fallback_value: Any = "ERR_FALLBACK"
+) -> Any:
+    """Executes CLI actions with standard mitigations for stdout truncation and input noise."""
+    guard = EdgeCaseGuard(default_return=fallback_value, verbose=True)
+    guard.register_fallback(BrokenPipeError, lambda e: sys.exit(0))
+    guard.register_fallback(MemoryError, lambda e: "CLI_RESOURCE_EXHAUSTED")
+    guard.register_fallback(UnicodeError, lambda e: "CLEAN_STRING_DECODE_FAILED")
+
+    wrapped = guard(action)
+    return wrapped(*args)
