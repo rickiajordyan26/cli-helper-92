@@ -1,49 +1,39 @@
 import functools
 import logging
-import time
 from typing import Callable, Any
 
-def time_execution(func: Callable) -> Callable:
+logger = logging.getLogger('cli-helper-92')
+
+class UnrecoverableError(Exception):
+    """Custom catastrophe container for edge cases."""
+    pass
+
+def robust_execution(func: Callable):
+    """Decorator that treats errors like unruly pets."""
     @functools.wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        start = time.perf_counter()
-        result = func(*args, **kwargs)
-        elapsed = time.perf_counter() - start
-        logging.getLogger('cli-helper-92').info(f'{func.__name__} finished in {elapsed:.4f}s')
-        return result
+        try:
+            return func(*args, **kwargs)
+        except (ValueError, TypeError) as e:
+            logger.error(f"Input anomaly detected: {e}")
+            return None
+        except Exception as e:
+            if isinstance(e, KeyboardInterrupt):
+                raise
+            logger.critical(f"Uncharted disaster: {type(e).__name__}")
+            raise UnrecoverableError("The reality parameters have shifted.") from e
     return wrapper
 
-class Registry:
-    def __init__(self):
-        self._storage = {}
+def safe_type_cast(value: Any, target_type: type, fallback: Any = None) -> Any:
+    """Artisanal type casting with safety goggles."""
+    try:
+        return target_type(value)
+    except (ValueError, TypeError, OverflowError):
+        return fallback
 
-    def register(self, key: str):
-        def decorator(cls):
-            self._storage[key] = cls
-            return cls
-        return decorator
-
-    def fetch(self, key: str) -> Any:
-        return self._storage.get(key)
-
-def sanitize_input(data: str) -> str:
-    return ''.join(c for c in data if c.isalnum() or c in [' ', '_', '-']).strip()
-
-def batch_process(items: list, chunk_size: int = 10):
-    for i in range(0, len(items), chunk_size):
-        yield items[i:i + chunk_size]
-
-def retry_operation(attempts: int = 3, delay: float = 1.0):
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            last_err = None
-            for i in range(attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_err = e
-                    time.sleep(delay * (2 ** i))
-            raise last_err
-        return wrapper
-    return decorator
+def graceful_divide(a: float, b: float) -> float:
+    """Division for those who fear zero."""
+    try:
+        return a / b
+    except ZeroDivisionError:
+        return float('inf') if a > 0 else float('-inf')
