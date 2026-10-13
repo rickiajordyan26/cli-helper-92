@@ -1,38 +1,33 @@
 import logging
 from logging.handlers import RotatingFileHandler
-import os
+import sys
 
-class LoggerSetup:
-    """A creative approach to ephemeral log management."""
-    def __init__(self, name="cli-helper-92", path="logs/app.log"):
-        self.name = name
-        self.path = path
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+def get_logger(name='cli-helper-92', log_file='app.log'):
+    """Factory for a logger that plays musical chairs with log files."""
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
 
-    def get_logger(self):
-        logger = logging.getLogger(self.name)
-        logger.setLevel(logging.DEBUG)
-        
-        # Custom formatter for visual clarity
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(filename)s:%(lineno)d | %(message)s'
-        )
+    # formatter for that 'professional' look
+    formatter = logging.Formatter(
+        '%(asctime)s | %(levelname)-8s | %(name)s : %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
 
-        # Rotating file handler: 1MB size, keep 3 backups
-        handler = RotatingFileHandler(
-            self.path, 
-            maxBytes=1_048_576, 
-            backupCount=3
-        )
-        handler.setFormatter(formatter)
-        
-        # Avoid duplicate handlers if re-initialized
-        if not logger.handlers:
-            logger.addHandler(handler)
-            console = logging.StreamHandler()
-            console.setFormatter(formatter)
-            logger.addHandler(console)
-            
-        return logger
+    # rotate logs: max 2MB, keep 5 history files
+    handler = RotatingFileHandler(
+        log_file, 
+        maxBytes=2*1024*1024, 
+        backupCount=5
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
-log_instance = LoggerSetup().get_logger()
+    # also shout to stdout because silence is boring
+    console = logging.StreamHandler(sys.stdout)
+    console.setFormatter(formatter)
+    logger.addHandler(console)
+
+    # prevents duplicate logs from propagation mishaps
+    logger.propagate = False
+    
+    return logger
