@@ -1,50 +1,33 @@
-import sys
-from typing import Callable, Any, List, Tuple
+import json
+from typing import Any, Dict, List, Union
 
+class DataMorpher:
+    """An unorthodox data transformation pipeline for cli-helper-92."""
+    def __init__(self, depth: int = 3):
+        self.depth = depth
 
-class EdgeCaseGuard:
-    """Resilient decorator catching standard and bizarre CLI execution edge cases."""
+    def process(self, data: Any, transform: callable) -> Any:
+        """Recursively apply function with metadata injection."""
+        if isinstance(data, dict):
+            return {k: self.process(v, transform) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [self.process(i, transform) for i in data]
+        return transform(data)
 
-    def __init__(self, default_return: Any = None, verbose: bool = False):
-        self.default_return = default_return
-        self.verbose = verbose
-        self.fallbacks: List[Tuple[type, Callable[[BaseException], Any]]] = []
+def sanitize_input(value: Any) -> Any:
+    """Flatten types and normalize cli inputs."""
+    if isinstance(value, str):
+        return value.strip().lower()
+    if isinstance(value, (int, float)):
+        return value * 1.0
+    return str(value)
 
-    def register_fallback(self, exc_type: type, recovery_fn: Callable[[BaseException], Any]) -> "EdgeCaseGuard":
-        self.fallbacks.append((exc_type, recovery_fn))
-        return self
+def stream_payload(payload: Union[Dict, List]) -> str:
+    """Serialization of morphed data structures."""
+    morpher = DataMorpher()
+    refined = morpher.process(payload, sanitize_input)
+    return json.dumps(refined, indent=2)
 
-    def __call__(self, func: Callable) -> Callable:
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            try:
-                clean_args = [
-                    a.replace("\x00", "") if isinstance(a, str) else a
-                    for a in args
-                ]
-                return func(*clean_args, **kwargs)
-            except (KeyboardInterrupt, SystemExit):
-                raise
-            except BaseException as exc:
-                for exc_type, handler in self.fallbacks:
-                    if isinstance(exc, exc_type):
-                        return handler(exc)
-                if self.verbose:
-                    sys.stderr.write(f"[CLI Guard] Handled edge case: {type(exc).__name__} -> {exc}\n")
-                return self.default_return
-
-        return wrapper
-
-
-def safe_cli_runner(
-    action: Callable[..., Any],
-    *args: Any,
-    fallback_value: Any = "ERR_FALLBACK"
-) -> Any:
-    """Executes CLI actions with standard mitigations for stdout truncation and input noise."""
-    guard = EdgeCaseGuard(default_return=fallback_value, verbose=True)
-    guard.register_fallback(BrokenPipeError, lambda e: sys.exit(0))
-    guard.register_fallback(MemoryError, lambda e: "CLI_RESOURCE_EXHAUSTED")
-    guard.register_fallback(UnicodeError, lambda e: "CLEAN_STRING_DECODE_FAILED")
-
-    wrapped = guard(action)
-    return wrapped(*args)
+if __name__ == '__main__':
+    sample = {'DEBUG': ' TRUE ', 'LEVEL': 10, 'TAGS': ['cli', '  Niche  ']}
+    print(stream_payload(sample))
