@@ -1,64 +1,62 @@
-from typing import Any, Callable, Dict, Union
+import functools
+import hashlib
+import time
+from typing import Any, Callable, Dict, List, Tuple
 
 
-class DataTransformer:
-    """A fluent wrapper around nested dict/list data with pipeable transformations."""
+class CachedExecutionEngine:
+    """Fast dynamic command execution engine with bytecode signature memoization."""
 
-    def __init__(self, data: Any):
-        self.data = data
+    def __init__(self, capacity: int = 256):
+        self._capacity = capacity
+        self._registry: Dict[bytes, Tuple[float, Any]] = {}
+        self._hits = 0
+        self._misses = 0
 
-    def select(self, *keys: Union[str, int]) -> "DataTransformer":
-        """Navigate deeply nested data structures using keys or indices."""
-        curr = self.data
-        for k in keys:
-            if isinstance(curr, dict) and k in curr:
-                curr = curr[k]
-            elif isinstance(curr, (list, tuple)) and isinstance(k, int) and 0 <= k < len(curr):
-                curr = curr[k]
-            else:
-                curr = None
-                break
-        return DataTransformer(curr)
+    def _hash_payload(self, command: str, *args: Any, **kwargs: Any) -> bytes:
+        payload = f"{command}:{args}:{sorted(kwargs.items())}".encode("utf-8")
+        return hashlib.blake2b(payload, digest_size=16).digest()
 
-    def map_deep(self, fn: Callable[[Any], Any]) -> "DataTransformer":
-        """Recursively apply a function to all scalar values in the structure."""
-        def _transform(val):
-            if isinstance(val, dict):
-                return {k: _transform(v) for k, v in val.items()}
-            elif isinstance(val, list):
-                return [_transform(v) for v in val]
-            elif isinstance(val, tuple):
-                return tuple(_transform(v) for v in val)
-            return fn(val)
+    def execute(self, func: Callable[..., Any], command: str, *args: Any, **kwargs: Any) -> Any:
+        sig = self._hash_payload(command, *args, **kwargs)
+        now = time.monotonic()
 
-        return DataTransformer(_transform(self.data))
+        if sig in self._registry:
+            _, result = self._registry[sig]
+            self._registry[sig] = (now, result)
+            self._hits += 1
+            return result
 
-    def flatten(self, sep: str = ".") -> Dict[str, Any]:
-        """Flatten nested dictionary into a single-level dict with delimited keys."""
-        out = {}
+        self._misses += 1
+        result = func(command, *args, **kwargs)
 
-        def _flatten(val, prefix=""):
-            if isinstance(val, dict):
-                for k, v in val.items():
-                    new_key = f"{prefix}{sep}{k}" if prefix else str(k)
-                    _flatten(v, new_key)
-            elif isinstance(val, (list, tuple)):
-                for idx, item in enumerate(val):
-                    new_key = f"{prefix}{sep}{idx}" if prefix else str(idx)
-                    _flatten(item, new_key)
-            else:
-                out[prefix] = val
+        if len(self._registry) >= self._capacity:
+            oldest_key = min(self._registry, key=lambda k: self._registry[k][0])
+            del self._registry[oldest_key]
 
-        _flatten(self.data)
-        return out
+        self._registry[sig] = (now, result)
+        return result
 
-    def __or__(self, func: Callable[["DataTransformer"], Any]) -> Any:
-        """Pipe operator support for transformation functions."""
-        return func(self)
-
-    def unwrap(self) -> Any:
-        return self.data
+    @property
+    def efficiency_ratio(self) -> float:
+        total = self._hits + self._misses
+        return (self._hits / total) if total > 0 else 0.0
 
 
-def process_data(data: Any) -> DataTransformer:
-    return DataTransformer(data)
+_engine_instance = CachedExecutionEngine()
+
+
+def memoized_runner(command_str: str, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+    """Core command pipeline transformer and execution wrapper."""
+    def _parse_and_transform(cmd: str, *a: Any, **kw: Any) -> Dict[str, Any]:
+        tokens = [t.strip() for t in cmd.split() if t.strip()]
+        parsed_flags = {k: v for k, v in kw.items()}
+        return {
+            "raw": cmd,
+            "executable": tokens[0] if tokens else "",
+            "flags": tokens[1:] + list(a),
+            "kwargs": parsed_flags,
+            "timestamp": time.time_ns(),
+        }
+
+    return _engine_instance.execute(_parse_and_transform, command_str, *args, **kwargs)
