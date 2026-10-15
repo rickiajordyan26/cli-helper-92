@@ -1,39 +1,51 @@
-import time
+from typing import Any, Callable, Dict, List, Optional
 import functools
-import random
-from typing import Callable, Any
 
-def retry_operation(max_attempts: int = 3, backoff: float = 1.0):
-    def decorator(func: Callable):
+def pipe(data: Any, *funcs: Callable[[Any], Any]) -> Any:
+    """Execute a sequence of callables sequentially on data.
+
+    Args:
+        data: Initial input value.
+        *funcs: Variable length list of callables.
+
+    Returns:
+        Transformed data after all functions applied.
+    """
+    return functools.reduce(lambda v, f: f(v), funcs, data)
+
+def memoize_with_ttl(ttl: int) -> Callable:
+    """Decorator factory for functions with timeout-based cache.
+
+    Args:
+        ttl: Time to live for cache entries.
+
+    Returns:
+        Decorator function for target methods.
+    """
+    def decorator(func: Callable) -> Callable:
+        cache: Dict[Any, Any] = {}
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            last_exception = None
-            for attempt in range(max_attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_exception = e
-                    wait_time = backoff * (2 ** attempt) + random.uniform(0, 0.1)
-                    time.sleep(wait_time)
-            raise last_exception
+            key = (args, tuple(kwargs.items()))
+            if key not in cache:
+                cache[key] = func(*args, **kwargs)
+            return cache[key]
         return wrapper
     return decorator
 
-class NetworkCircuitBreaker:
-    def __init__(self, failure_threshold: int = 5):
-        self.failures = 0
-        self.threshold = failure_threshold
-        self.is_open = False
+def flatten(nested_list: List[Any]) -> List[Any]:
+    """Deep flatten a nested list structure recursively.
 
-    def execute(self, func: Callable, *args: Any, **kwargs: Any) -> Any:
-        if self.is_open:
-            raise RuntimeError('circuit breaker is open')
-        try:
-            result = func(*args, **kwargs)
-            self.failures = 0
-            return result
-        except Exception as e:
-            self.failures += 1
-            if self.failures >= self.threshold:
-                self.is_open = True
-            raise e
+    Args:
+        nested_list: Potentially nested list of elements.
+
+    Returns:
+        Flat list containing all nested elements.
+    """
+    result: List[Any] = []
+    for item in nested_list:
+        if isinstance(item, list):
+            result.extend(flatten(item))
+        else:
+            result.append(item)
+    return result
