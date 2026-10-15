@@ -1,33 +1,54 @@
-import json
-from typing import Any, Dict, List, Union
+import sys
+import os
+from functools import wraps
 
-class DataMorpher:
-    """An unorthodox data transformation pipeline for cli-helper-92."""
-    def __init__(self, depth: int = 3):
-        self.depth = depth
+class ExecutionFlow:
+    def __init__(self, debug=False):
+        self.debug = debug
+        self.context = {}
 
-    def process(self, data: Any, transform: callable) -> Any:
-        """Recursively apply function with metadata injection."""
-        if isinstance(data, dict):
-            return {k: self.process(v, transform) for k, v in data.items()}
-        elif isinstance(data, list):
-            return [self.process(i, transform) for i in data]
-        return transform(data)
+    def __call__(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                result = func(*args, **kwargs)
+                return result
+            except Exception as e:
+                if self.debug:
+                    print(f'Execution failure: {e}', file=sys.stderr)
+                return None
+        return wrapper
 
-def sanitize_input(value: Any) -> Any:
-    """Flatten types and normalize cli inputs."""
-    if isinstance(value, str):
-        return value.strip().lower()
-    if isinstance(value, (int, float)):
-        return value * 1.0
-    return str(value)
+class CliHandler:
+    def __init__(self, registry=None):
+        self.registry = registry or {}
+        self.env = os.environ.get('ENV', 'production')
 
-def stream_payload(payload: Union[Dict, List]) -> str:
-    """Serialization of morphed data structures."""
-    morpher = DataMorpher()
-    refined = morpher.process(payload, sanitize_input)
-    return json.dumps(refined, indent=2)
+    def register(self, name):
+        def decorator(func):
+            self.registry[name] = func
+            return func
+        return decorator
 
-if __name__ == '__main__':
-    sample = {'DEBUG': ' TRUE ', 'LEVEL': 10, 'TAGS': ['cli', '  Niche  ']}
-    print(stream_payload(sample))
+    def dispatch(self, cmd, *args):
+        task = self.registry.get(cmd)
+        if not task:
+            return f'Command {cmd} not found'
+        return task(*args)
+
+    def cleanup(self):
+        self.registry.clear()
+        self.env = None
+
+def init_handler():
+    handler = CliHandler()
+    
+    @handler.register('echo')
+    def echo_task(*args):
+        return ' '.join(args)
+
+    @handler.register('ping')
+    def ping_task(*args):
+        return 'pong'
+
+    return handler
