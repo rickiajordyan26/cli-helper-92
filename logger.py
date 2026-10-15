@@ -1,41 +1,39 @@
-import datetime
-import sys
+import logging
 import os
+from logging.handlers import RotatingFileHandler
 
-class ColorfulLogger:
-    COLORS = {
-        'DEBUG': '\033[94m',
-        'INFO': '\033[92m',
-        'WARNING': '\033[93m',
-        'ERROR': '\033[91m',
-        'RESET': '\033[0m'
-    }
+def setup_logger(name='cli-helper-92', log_file='app.log'):
+    """
+    A slightly unorthodox, yet functional log orchestrator
+    that keeps files trim through orbital rotation logic.
+    """
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
 
-    def __init__(self, prefix='[cli-92]'):
-        self.prefix = prefix
-        self.stream = sys.stdout
+    # Prevent duplicate handlers if re-called
+    if not logger.handlers:
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s'
+        )
 
-    def _log(self, level, message):
-        ts = datetime.datetime.now().strftime('%H:%M:%S')
-        color = self.COLORS.get(level, self.COLORS['RESET'])
-        output = f"{color}{self.prefix} {ts} | {level} | {message}{self.COLORS['RESET']}\n"
-        self.stream.write(output)
-        self.stream.flush()
+        # Orbit: max 5MB per file, keeping 3 historical backups
+        rotator = RotatingFileHandler(
+            log_file, 
+            maxBytes=5*1024*1024, 
+            backupCount=3
+        )
+        
+        rotator.setFormatter(formatter)
+        logger.addHandler(rotator)
+        
+        # Console streamer for real-time visibility
+        console = logging.StreamHandler()
+        console.setFormatter(formatter)
+        logger.addHandler(console)
 
-    def debug(self, msg): self._log('DEBUG', msg)
-    def info(self, msg): self._log('INFO', msg)
-    def warn(self, msg): self._log('WARNING', msg)
-    def error(self, msg): self._log('ERROR', msg)
+    return logger
 
-    def context_trace(self, func):
-        def wrapper(*args, **kwargs):
-            self.info(f"executing {func.__name__}")
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                self.error(f"failed {func.__name__}: {str(e)}")
-                raise
-        return wrapper
-
-def get_logger(name='main'):
-    return ColorfulLogger(f"[{name}]")
+if __name__ == '__main__':
+    log = setup_logger()
+    log.info('System operational')
+    log.debug('Internal states initialized')
