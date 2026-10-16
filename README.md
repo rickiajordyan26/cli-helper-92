@@ -1,54 +1,53 @@
 # cli-helper-92
 
-`cli-helper-92` is a lightweight Python utility designed to streamline common CLI workflows by automating repetitive task execution. It provides a robust wrapper around standard system operations to ensure cross-platform consistency for shell scripting.
+`cli-helper-92` is a lightweight Python utility designed to streamline command-line interactions and automate repetitive terminal workflows. It provides a robust wrapper for handling common CLI tasks, ensuring your scripts remain clean, readable, and maintainable.
 
-## Features
+### Features
+* **Interactive Prompt Engine**: Simplifies the creation of complex user input flows with built-in validation and auto-completion.
+* **Config Persistence**: Automatically manages local JSON/YAML configuration files to maintain user state across sessions.
+* **Streamlined Logging**: Implements pre-configured color-coded logging levels to track process execution without cluttering standard output.
+* **Sub-command Routing**: Offers a declarative decorator pattern to handle complex argument parsing and multi-level command nesting.
 
-*   **Task Orchestration:** Execute complex multi-step terminal workflows using simple, chainable configuration files.
-*   **Intelligent Logging:** Automatically captures and timestamps stdout/stderr streams to dedicated log files for easier debugging.
-*   **Environment Validation:** Built-in checks to verify that required system dependencies are present before triggering execution.
-*   **Cross-Platform Core:** Optimized for native performance on macOS, Linux, and Windows Subsystem for Linux (WSL).
+### Installation
 
-## Installation
-
-Install the package directly via pip:
+Requires Python 3.8+ and `pip`. Install the package directly from PyPI:
 
 ```bash
 pip install cli-helper-92
 ```
 
-To install from source for development purposes:
+Alternatively, install from source:
 
 ```bash
 git clone https://github.com/Developer/cli-helper-92.git
 cd cli-helper-92
-pip install -e .
+pip install .
 ```
 
-## Usage
+### Usage
 
-Define your command tasks in a `tasks.yaml` file and execute them with a single command.
+Integrate `cli-helper-92` into your project to handle argument parsing and interactive setup in seconds:
 
-**Example `tasks.yaml`:**
-```yaml
-build:
-  command: "python setup.py sdist bdist_wheel"
-  description: "Package the application"
+```python
+from cli_helper_92 import CLIApp
+
+app = CLIApp(name="MyTool", version="1.0.0")
+
+@app.command(help="Greet the user")
+def greet(name: str = "User"):
+    app.logger.info(f"Hello, {name}!")
+
+if __name__ == "__main__":
+    app.run()
 ```
 
-**Running the tool:**
+Run your tool from the terminal:
+
 ```bash
-cli-helper run build --verbose
+python main.py greet --name "Developer"
 ```
 
-You can also list all available tasks defined in your configuration:
-
-```bash
-cli-helper list
-```
-
-## License
-
+### License
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Distributed under the MIT License. See `LICENSE` for more information.
+This project is licensed under the terms of the MIT License.
