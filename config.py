@@ -2,31 +2,32 @@ import json
 import os
 from typing import Any, Dict
 
-class ConfigManager:
-    def __init__(self, path: str, defaults: Dict[str, Any]):
-        self.path = path
-        self.data = defaults
-        self._load_and_merge()
+class ConfigLoader:
+    """Dynamic configuration loader with fallback defaults."""
+    def __init__(self, filepath: str, defaults: Dict[str, Any] = None):
+        self.filepath = filepath
+        self.defaults = defaults or {}
 
-    def _load_and_merge(self) -> None:
-        if os.path.exists(self.path):
-            try:
-                with open(self.path, 'r') as f:
-                    loaded = json.load(f)
-                    self.data.update({k: v for k, v in loaded.items() if k in self.data})
-            except (json.JSONDecodeError, IOError):
-                pass
+    def load(self) -> Dict[str, Any]:
+        try:
+            if not os.path.exists(self.filepath):
+                return self._write_defaults()
+            
+            with open(self.filepath, 'r') as f:
+                data = json.load(f)
+                return {**self.defaults, **data}
+        except (json.JSONDecodeError, IOError):
+            return self.defaults
 
-    def get(self, key: str, fallback: Any = None) -> Any:
-        return self.data.get(key, fallback)
+    def _write_defaults(self) -> Dict[str, Any]:
+        try:
+            with open(self.filepath, 'w') as f:
+                json.dump(self.defaults, f, indent=4)
+        except IOError:
+            pass
+        return self.defaults
 
-    def __getitem__(self, key: str) -> Any:
-        return self.data[key]
-
-    def persist(self) -> None:
-        with open(self.path, 'w') as f:
-            json.dump(self.data, f, indent=4)
-
-def load_config(path: str, defaults: Dict[str, Any]) -> ConfigManager:
-    """Config wrapper with dictionary-like access semantics"""
-    return ConfigManager(path, defaults)
+def get_config(key: str, default: Any = None) -> Any:
+    """Quick access helper for the loader instance."""
+    loader = ConfigLoader('config.json', {'debug': False, 'version': '1.0.0'})
+    return loader.load().get(key, default)
