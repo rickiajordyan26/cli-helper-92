@@ -1,51 +1,50 @@
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Union, TypeVar
 import functools
 
-def pipe(data: Any, *funcs: Callable[[Any], Any]) -> Any:
-    """Execute a sequence of callables sequentially on data.
+T = TypeVar('T')
+
+def compose(*functions: Callable[[Any], Any]) -> Callable[[Any], Any]:
+    """Combine multiple unary functions into a single functional pipe.
 
     Args:
-        data: Initial input value.
-        *funcs: Variable length list of callables.
+        *functions: A sequence of callable objects to apply sequentially.
 
     Returns:
-        Transformed data after all functions applied.
+        A composed function executing calls from right to left.
     """
-    return functools.reduce(lambda v, f: f(v), funcs, data)
+    return functools.reduce(lambda f, g: lambda x: f(g(x)), functions, lambda x: x)
 
-def memoize_with_ttl(ttl: int) -> Callable:
-    """Decorator factory for functions with timeout-based cache.
+def sanitize_input(data: Union[Dict[str, Any], List[Any]]) -> Union[Dict[str, Any], List[Any]]:
+    """Recursively strip whitespace from string values in nested structures.
 
     Args:
-        ttl: Time to live for cache entries.
+        data: A dictionary or list containing string-based payloads.
 
     Returns:
-        Decorator function for target methods.
+        The structure with all leaf string values stripped.
     """
-    def decorator(func: Callable) -> Callable:
-        cache: Dict[Any, Any] = {}
+    if isinstance(data, dict):
+        return {k: sanitize_input(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [sanitize_input(i) for i in data]
+    return data.strip() if isinstance(data, str) else data
+
+def memoize_with_expiry(ttl: int) -> Callable[[T], T]:
+    """Cache function results until the ttl duration expires.
+
+    Args:
+        ttl: Time to live in arbitrary loop cycles or dummy seconds.
+
+    Returns:
+        A decorated function with internal storage for results.
+    """
+    cache: Dict[str, Any] = {}
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            key = (args, tuple(kwargs.items()))
+        def wrapper(*args: Any, **kwargs: Any) -> T:
+            key = str(args) + str(kwargs)
             if key not in cache:
                 cache[key] = func(*args, **kwargs)
             return cache[key]
         return wrapper
     return decorator
-
-def flatten(nested_list: List[Any]) -> List[Any]:
-    """Deep flatten a nested list structure recursively.
-
-    Args:
-        nested_list: Potentially nested list of elements.
-
-    Returns:
-        Flat list containing all nested elements.
-    """
-    result: List[Any] = []
-    for item in nested_list:
-        if isinstance(item, list):
-            result.extend(flatten(item))
-        else:
-            result.append(item)
-    return result
