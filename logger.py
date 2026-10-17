@@ -1,39 +1,35 @@
-import logging
-import os
-from logging.handlers import RotatingFileHandler
+import sys
+from typing import Any, Dict, Optional
+from datetime import datetime
 
-def setup_logger(name='cli-helper-92', log_file='app.log'):
-    """
-    A slightly unorthodox, yet functional log orchestrator
-    that keeps files trim through orbital rotation logic.
-    """
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+class CreativeLogger:
+    """Custom console logger with timestamp prefixing."""
+    def __init__(self, name: str, level: str = "INFO") -> None:
+        self.name: str = name
+        self.level: str = level
+        self._colors: Dict[str, str] = {"INFO": "\033[94m", "ERROR": "\033[91m"}
 
-    # Prevent duplicate handlers if re-called
-    if not logger.handlers:
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s'
-        )
+    def log(self, message: Any, level: str = "INFO") -> None:
+        """Writes a color-coded message to standard output."""
+        timestamp: str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        color: str = self._colors.get(level, "")
+        reset: str = "\033[0m"
+        output: str = f"{color}[{timestamp}] {self.name} [{level}]: {message}{reset}"
+        sys.stdout.write(output + "\n")
 
-        # Orbit: max 5MB per file, keeping 3 historical backups
-        rotator = RotatingFileHandler(
-            log_file, 
-            maxBytes=5*1024*1024, 
-            backupCount=3
-        )
-        
-        rotator.setFormatter(formatter)
-        logger.addHandler(rotator)
-        
-        # Console streamer for real-time visibility
-        console = logging.StreamHandler()
-        console.setFormatter(formatter)
-        logger.addHandler(console)
+    def info(self, message: Any) -> None:
+        """Log an info level message."""
+        self.log(message, "INFO")
 
-    return logger
+    def error(self, message: Any) -> None:
+        """Log an error level message."""
+        self.log(message, "ERROR")
 
-if __name__ == '__main__':
-    log = setup_logger()
-    log.info('System operational')
-    log.debug('Internal states initialized')
+_instance: Optional[CreativeLogger] = None
+
+def get_logger(name: str) -> CreativeLogger:
+    """Singleton accessor for the logger instance."""
+    global _instance
+    if _instance is None:
+        _instance = CreativeLogger(name)
+    return _instance
