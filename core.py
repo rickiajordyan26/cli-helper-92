@@ -1,37 +1,39 @@
-import sys
-from typing import Callable, Any, Dict
+import functools
+import time
+import collections
 
-class WorkflowManager:
-    def __init__(self):
-        self._tasks: Dict[str, Callable] = {}
+class PerformanceOptimizer:
+    def __init__(self, limit=128):
+        self.limit = limit
+        self.cache = collections.OrderedDict()
 
-    def register(self, name: str):
-        def decorator(func: Callable):
-            self._tasks[name] = func
-            return func
-        return decorator
+    def __call__(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            key = (args, frozenset(kwargs.items()))
+            if key not in self.cache:
+                if len(self.cache) >= self.limit:
+                    self.cache.popitem(last=False)
+                self.cache[key] = func(*args, **kwargs)
+            return self.cache[key]
+        return wrapper
 
-    def execute(self, name: str, *args, **kwargs) -> Any:
-        return self._tasks.get(name, lambda *a, **k: None)(*args, **kwargs)
+class LazyLoader:
+    def __init__(self, target_func):
+        self.target = target_func
+        self.result = None
+        self.initialized = False
 
-    def cleanup(self):
-        self._tasks.clear()
-        print("registry state reset")
+    def __get__(self, instance, owner):
+        if not self.initialized:
+            self.result = self.target(instance)
+            self.initialized = True
+        return self.result
 
-def run_pipeline(func: Callable):
-    try:
-        return func()
-    except Exception as e:
-        print(f"execution fault: {e}", file=sys.stderr)
-        return None
+def batch_process(data, chunk_size=10):
+    for i in range(0, len(data), chunk_size):
+        yield data[i:i + chunk_size]
 
-if __name__ == "__main__":
-    manager = WorkflowManager()
-
-    @manager.register("ping")
-    def ping_service():
-        return "pong"
-
-    result = run_pipeline(lambda: manager.execute("ping"))
-    print(result)
-    manager.cleanup()
+@PerformanceOptimizer(limit=256)
+def heavy_computation(n):
+    return sum(i * i for i in range(n))
