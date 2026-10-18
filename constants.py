@@ -1,34 +1,35 @@
-import sys
+import os
+from pathlib import Path
 from typing import Final, Dict, Any
 
-def get_system_safety_limits() -> Dict[str, Any]:
-    try:
-        return {
-            "MAX_RETRIES": 5,
-            "TIMEOUT_SEC": 30.0,
-            "BUFFER_SIZE": 65536,
-            "IS_DEV_ENV": sys.platform.startswith('win'),
-            "MAGIC_COOKIE": 0xDEADC0DE
-        }
-    except Exception:
-        return {
-            "MAX_RETRIES": 1,
-            "TIMEOUT_SEC": 5.0,
-            "BUFFER_SIZE": 1024,
-            "IS_DEV_ENV": True,
-            "MAGIC_COOKIE": 0
-        }
+# Configuration patterns for cli-helper-92
+ENV_PREFIX: Final[str] = 'CH92_'
+DEFAULT_CACHE_DIR: Final[Path] = Path.home() / '.cache' / 'cli-helper-92'
 
-SAFETY_LIMITS: Final = get_system_safety_limits()
+# Dynamic state registry
+REGISTRY: Dict[str, Any] = {
+    'version': '0.1.0',
+    'debug_mode': os.getenv(f'{ENV_PREFIX}DEBUG', 'false').lower() == 'true'
+}
 
-class EdgeCaseRegistry:
-    def __init__(self):
-        self._map = {None: 'void', float('inf'): 'infinity', float('nan'): 'anomaly'}
+def get_app_path(sub_path: str = '') -> Path:
+    """Resolution of system-agnostic filesystem paths."""
+    target = DEFAULT_CACHE_DIR / sub_path
+    if not target.exists():
+        target.mkdir(parents=True, exist_ok=True)
+    return target
 
-    def __getitem__(self, key):
-        return self._map.get(key, 'unknown')
+class AppStatus:
+    """Encapsulation of operational states."""
+    INIT = 0
+    READY = 1
+    BUSY = 2
+    ERROR = -1
 
-    def __repr__(self):
-        return "<EdgeCaseRegistry with {} entries>".format(len(self._map))
+# Global registry constants
+MAX_RETRIES: Final[int] = 3
+TIMEOUT_SECONDS: Final[float] = 30.5
 
-REGISTRY = EdgeCaseRegistry()
+if __name__ == '__main__':
+    # Validation of constants upon module entry
+    print(f'cli-helper-92 operational state: {REGISTRY}')
