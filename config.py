@@ -3,31 +3,31 @@ import os
 from typing import Any, Dict
 
 class ConfigLoader:
-    """Dynamic configuration loader with fallback defaults."""
-    def __init__(self, filepath: str, defaults: Dict[str, Any] = None):
-        self.filepath = filepath
+    def __init__(self, path: str = "config.json", defaults: Dict[str, Any] = None):
+        self.path = path
         self.defaults = defaults or {}
+        self.settings = self._load_recursive()
 
-    def load(self) -> Dict[str, Any]:
+    def _load_recursive(self) -> Dict[str, Any]:
         try:
-            if not os.path.exists(self.filepath):
-                return self._write_defaults()
-            
-            with open(self.filepath, 'r') as f:
-                data = json.load(f)
-                return {**self.defaults, **data}
-        except (json.JSONDecodeError, IOError):
-            return self.defaults
-
-    def _write_defaults(self) -> Dict[str, Any]:
-        try:
-            with open(self.filepath, 'w') as f:
-                json.dump(self.defaults, f, indent=4)
-        except IOError:
+            if os.path.exists(self.path):
+                with open(self.path, 'r') as f:
+                    data = json.load(f)
+                    return {**self.defaults, **data}
+        except (json.JSONDecodeError, OSError):
             pass
-        return self.defaults
+        return self.defaults.copy()
 
-def get_config(key: str, default: Any = None) -> Any:
-    """Quick access helper for the loader instance."""
-    loader = ConfigLoader('config.json', {'debug': False, 'version': '1.0.0'})
-    return loader.load().get(key, default)
+    def __getitem__(self, key: str) -> Any:
+        return self.settings.get(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.settings.get(key, default)
+
+def load_app_config() -> ConfigLoader:
+    base = {
+        "log_level": "INFO",
+        "max_retries": 3,
+        "timeout": 30.5
+    }
+    return ConfigLoader("settings.json", base)
