@@ -1,34 +1,54 @@
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Tuple
 
-class DataSanitizer:
-    """A whimsical pipeline for data coercion and validation."""
-    
-    def __init__(self, registry: Optional[Dict[str, Callable]] = None):
-        self._registry = registry or {}
 
-    def __getitem__(self, key: str) -> Callable:
-        return self._registry.get(key, lambda x: x)
+class Rule:
+    """Validator rule wrapper supporting bitwise composition."""
 
-    def apply(self, data: Dict[str, Any], schema: Dict[str, str]) -> Dict[str, Any]:
-        sanitized = {}
-        for field, func_key in schema.items():
-            raw_value = data.get(field)
-            processor = self[func_key]
-            sanitized[field] = processor(raw_value) if raw_value is not None else None
-        return sanitized
+    def __init__(self, predicate: Callable[[Any], bool], msg: str = "Validation failed"):
+        self.predicate = predicate
+        self.msg = msg
 
-def string_to_int(val: Any) -> int:
-    try:
-        return int(val)
-    except (ValueError, TypeError):
-        return 0
+    def __call__(self, value: Any) -> Tuple[bool, str]:
+        try:
+            ok = self.predicate(value)
+            return (ok, "" if ok else self.msg)
+        except Exception as e:
+            return (False, f"Evaluation error: {e}")
 
-def clean_text(val: Any) -> str:
-    return str(val).strip().lower() if val else ""
+    def __and__(self, other: "Rule") -> "Rule":
+        def combined(val: Any) -> bool:
+            ok1, _ = self(val)
+            ok2, _ = other(val)
+            return ok1 and ok2
+        return Rule(combined, f"({self.msg} AND {other.msg})")
 
-def get_default_sanitizer() -> DataSanitizer:
-    return DataSanitizer({
-        "int": string_to_int,
-        "text": clean_text,
-        "bool": lambda x: bool(x)
-    })
+    def __or__(self, other: "Rule") -> "Rule":
+        def combined(val: Any) -> bool:
+            ok1, _ = self(val)
+            ok2, _ = other(val)
+            return ok1 or ok2
+        return Rule(combined, f"({self.msg} OR {other.msg})")
+
+
+def is_type(expected_type: type) -> Rule:
+    return Rule(lambda v: isinstance(v, expected_type), f"type must be {expected_type.__name__}")
+
+
+def in_range(min_val: float, max_val: float) -> Rule:
+    return Rule(lambda v: min_val <= float(v) <= max_val, f"value out of range [{min_val}, {max_val}]")
+
+
+def non_empty() -> Rule:
+    return Rule(lambda v: bool(v) and len(str(v).strip()) > 0, "value cannot be empty")
+
+
+def validate_dict(data: Dict[str, Any], schema: Dict[str, Rule]) -> Tuple[bool, Dict[str, List[str]]]:
+    errors: Dict[str, List[str]] = {}
+    for key, rule in schema.items():
+        if key not in data:
+            errors.setdefault(key, []).append("missing required field")
+            continue
+        ok, msg = rule(data[key])
+        if not ok:
+            errors.setdefault(key, []).append(msg)
+    return len(errors) == 0, errors
