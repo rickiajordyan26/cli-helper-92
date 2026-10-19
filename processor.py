@@ -1,62 +1,48 @@
-import sys
-import re
-from typing import Callable, Any, NamedTuple
+import json
+from typing import Any, Dict, Generator, Tuple, Union
 
 
-class ValidationResult(NamedTuple):
-    is_valid: bool
-    sanitized_value: Any
-    error_message: str = ""
+class DataStreamProcessor:
+    """Generator-based flattener and lookup engine for CLI data handling."""
+
+    def __init__(self, delimiter: str = "."):
+        self.delimiter = delimiter
+
+    def flatten(self, data: Any, prefix: str = "") -> Generator[Tuple[str, Any], None, None]:
+        """Recursively flattens arbitrarily nested data structures."""
+        if isinstance(data, dict):
+            for key, val in data.items():
+                next_key = f"{prefix}{self.delimiter}{key}" if prefix else str(key)
+                yield from self.flatten(val, next_key)
+        elif isinstance(data, (list, tuple, set)):
+            for index, item in enumerate(data):
+                next_key = f"{prefix}[{index}]"
+                yield from self.flatten(item, next_key)
+        else:
+            yield (prefix, data)
+
+    def transform(self, data: Any, filter_term: Union[str, None] = None) -> Dict[str, Any]:
+        """Transforms data into key-value map with optional fuzzy filter."""
+        flattened = dict(self.flatten(data))
+        if not filter_term:
+            return flattened
+        term = filter_term.lower()
+        return {k: v for k, v in flattened.items() if term in k.lower() or term in str(v).lower()}
 
 
-class Validator:
-    def __init__(self, check_fn: Callable[[str], bool], error_msg: str, transform_fn: Callable[[str], Any] = str):
-        self.check_fn = check_fn
-        self.error_msg = error_msg
-        self.transform_fn = transform_fn
+def format_for_display(payload: Any, filter_term: Union[str, None] = None) -> str:
+    """Utility function to parse and format data for terminal output."""
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            payload = {"text": payload}
 
-    def __call__(self, value: str) -> ValidationResult:
-        if self.check_fn(value):
-            return ValidationResult(True, self.transform_fn(value))
-        return ValidationResult(False, value, self.error_msg)
+    processor = DataStreamProcessor()
+    results = processor.transform(payload, filter_term)
 
-    def __or__(self, other: "Validator") -> "Validator":
-        def combined_check(val: str) -> bool:
-            res1 = self(val)
-            return res1.is_valid and other(res1.sanitized_value).is_valid
+    if not results:
+        return "No matching records found."
 
-        def combined_transform(val: str) -> Any:
-            return other.transform_fn(self.transform_fn(val))
-
-        return Validator(combined_check, f"{self.error_msg} | {other.error_msg}", combined_transform)
-
-
-NON_EMPTY = Validator(lambda s: bool(s and s.strip()), "input cannot be empty", str.strip)
-NO_SPECIAL_CHARS = Validator(lambda s: bool(re.match(r"^[a-zA-Z0-9_\-\s]+$", s)), "contains forbidden characters")
-MAX_LENGTH = Validator(lambda s: len(s) <= 50, "exceeds length limit of 50")
-
-
-def process_input_stream(stream=sys.stdin):
-    validator_pipeline = NON_EMPTY | NO_SPECIAL_CHARS | MAX_LENGTH
-    processed_records = []
-
-    print("cli-helper-92 input processor ready:")
-    for raw_line in iter(stream.readline, ""):
-        clean_line = raw_line.rstrip("\r\n")
-        if clean_line.lower() == "exit":
-            break
-
-        validation = validator_pipeline(clean_line)
-        if not validation.is_valid:
-            print(f"[REJECTED] {clean_line!r} -> {validation.error_message}")
-            continue
-
-        payload = validation.sanitized_value
-        processed_records.append(payload)
-        print(f"[ACCEPTED] {payload}")
-
-    return processed_records
-
-
-if __name__ == "__main__":
-    process_input_stream()
+    max_key_len = max(len(k) for k in results.keys())
+    return "\n".join(f"{k.ljust(max_key_len)} : {v}" for k, v in results.items())
