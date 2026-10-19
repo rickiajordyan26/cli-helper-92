@@ -1,32 +1,71 @@
 import json
 import os
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any, Dict, Union
 
-class ConfigLoader:
-    def __init__(self, file_path: str = "config.json", defaults: Dict[str, Any] = None):
-        self.file_path = file_path
-        self.defaults = defaults or {}
-        self.data = self._load()
+DEFAULT_CONFIG: Dict[str, Any] = {
+    "app_name": "cli-helper-92",
+    "debug": False,
+    "verbose": True,
+    "timeout": 30,
+    "output_format": "json",
+    "theme": {"primary": "cyan", "secondary": "magenta"},
+}
 
-    def _load(self) -> Dict[str, Any]:
-        if not os.path.exists(self.file_path):
-            return self.defaults
-        with open(self.file_path, "r") as f:
-            try:
-                loaded = json.load(f)
-                return {**self.defaults, **loaded}
-            except json.JSONDecodeError:
-                return self.defaults
+class ConfigBox:
+    """A wrapper providing attribute access and deep dictionary conversion."""
 
-    def get(self, key: str, fallback: Any = None) -> Any:
-        return self.data.get(key, fallback)
+    def __init__(self, data: Dict[str, Any]):
+        for key, val in data.items():
+            if isinstance(val, dict):
+                setattr(self, key, ConfigBox(val))
+            else:
+                setattr(self, key, val)
 
-    def __getattr__(self, item: str) -> Any:
-        return self.data.get(item)
+    def __getitem__(self, item: str) -> Any:
+        return getattr(self, item)
 
-def get_config(path: str, defaults: Dict[str, Any] = None) -> ConfigLoader:
-    return ConfigLoader(path, defaults or {})
+    def to_dict(self) -> Dict[str, Any]:
+        result = {}
+        for k, v in self.__dict__.items():
+            result[k] = v.to_dict() if isinstance(v, ConfigBox) else v
+        return result
 
-if __name__ == "__main__":
-    cfg = get_config("settings.json", {"debug": False, "port": 8080})
-    print(f"Active port: {cfg.port}")
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> None:
+    for k, v in override.items():
+        if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+
+def _apply_env_overrides(cfg: Dict[str, Any], prefix: str, path_prefix: str = "") -> None:
+    for k, v in cfg.items():
+        env_key = f"{prefix}{path_prefix}{k}".upper()
+        if isinstance(v, dict):
+            _apply_env_overrides(v, prefix, f"{path_prefix}{k}_")
+        elif env_key in os.environ:
+            raw_val = os.environ[env_key]
+            cfg[k] = _cast_value(raw_val, type(v))
+
+def _cast_value(val: str, target_type: type) -> Any:
+    if target_type is bool:
+        return val.lower() in ("true", "1", "yes", "on")
+    try:
+        return target_type(val)
+    except (ValueError, TypeError):
+        return val
+
+def load_config(
+    config_path: Union[str, Path] = "config.json",
+    env_prefix: str = "CLI_HELPER_",
+) -> ConfigBox:
+    merged = DEFAULT_CONFIG.copy()
+    path = Path(config_path)
+    if path.is_file():
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                _deep_merge(merged, json.load(f))
+        except json.JSONDecodeError:
+            pass
+    _apply_env_overrides(merged, env_prefix)
+    return ConfigBox(merged)
