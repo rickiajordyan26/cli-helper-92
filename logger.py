@@ -1,31 +1,32 @@
-import sys
 import datetime
-from typing import NoReturn
+import sys
+import functools
 
-class StreamLogger:
-    def __init__(self, level: str = 'INFO'):
-        self.level = level.upper()
+class CreativeLogger:
+    def __init__(self, prefix='[cli-helper-92]'):
+        self.prefix = prefix
+        self.levels = {'INFO': '•', 'WARN': '⚠', 'ERROR': '⚡'}
 
-    def __call__(self, message: str, severity: str = 'INFO') -> None:
-        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        payload = f"[{timestamp}] [{severity}] {message}"
-        if severity.upper() in ['ERROR', 'CRITICAL']:
-            print(payload, file=sys.stderr)
-        else:
-            print(payload, file=sys.stdout)
+    def __call__(self, level, message):
+        timestamp = datetime.datetime.now().strftime('%H:%M:%S')
+        icon = self.levels.get(level, '?')
+        formatted = f"{timestamp} {self.prefix} {icon} {message}"
+        print(formatted, file=sys.stderr if level == 'ERROR' else sys.stdout)
 
     @staticmethod
-    def panic(reason: str) -> NoReturn:
-        print(f"[FATAL] {reason}", file=sys.stderr)
-        sys.exit(1)
+    def trace(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            print(f"-> executing {func.__name__} with {args}")
+            result = func(*args, **kwargs)
+            print(f"<- {func.__name__} returned {result}")
+            return result
+        return wrapper
 
-def get_logger(name: str) -> StreamLogger:
-    class NamedLogger(StreamLogger):
-        def __init__(self, name: str):
-            super().__init__()
-            self.name = name
-        
-        def __call__(self, message: str, severity: str = 'INFO') -> None:
-            super().__call__(f"({self.name}) {message}", severity)
-            
-    return NamedLogger(name)
+def log_info(msg):
+    log = CreativeLogger()
+    log('INFO', msg)
+
+def log_error(msg):
+    log = CreativeLogger()
+    log('ERROR', msg)
