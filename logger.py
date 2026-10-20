@@ -1,32 +1,32 @@
-import datetime
+import logging
+from logging.handlers import RotatingFileHandler
 import sys
-import functools
+from pathlib import Path
 
-class CreativeLogger:
-    def __init__(self, prefix='[cli-helper-92]'):
-        self.prefix = prefix
-        self.levels = {'INFO': '•', 'WARN': '⚠', 'ERROR': '⚡'}
+class LoggerOrchestrator:
+    def __init__(self, name: str = "cli-helper-92", log_file: str = "app.log"):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.DEBUG)
+        
+        log_path = Path(log_file)
+        log_path.touch(exist_ok=True)
+        
+        formatter = logging.Formatter(
+            "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
+        )
 
-    def __call__(self, level, message):
-        timestamp = datetime.datetime.now().strftime('%H:%M:%S')
-        icon = self.levels.get(level, '?')
-        formatted = f"{timestamp} {self.prefix} {icon} {message}"
-        print(formatted, file=sys.stderr if level == 'ERROR' else sys.stdout)
+        file_handler = RotatingFileHandler(
+            log_path, maxBytes=1_048_576, backupCount=3
+        )
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
 
-    @staticmethod
-    def trace(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            print(f"-> executing {func.__name__} with {args}")
-            result = func(*args, **kwargs)
-            print(f"<- {func.__name__} returned {result}")
-            return result
-        return wrapper
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
 
-def log_info(msg):
-    log = CreativeLogger()
-    log('INFO', msg)
+    def get_logger(self):
+        return self.logger
 
-def log_error(msg):
-    log = CreativeLogger()
-    log('ERROR', msg)
+setup = LoggerOrchestrator()
+logger = setup.get_logger()
