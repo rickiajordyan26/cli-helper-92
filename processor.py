@@ -1,48 +1,44 @@
-import json
-from typing import Any, Dict, Generator, Tuple, Union
+import sys
+from typing import Generator, Dict, Any, Callable, List, Tuple
 
+class InputValidatorPipeline:
+    """Creative input validator pipeline using operator chaining for loop processing."""
 
-class DataStreamProcessor:
-    """Generator-based flattener and lookup engine for CLI data handling."""
+    def __init__(self):
+        self.validators: List[Tuple[str, Callable[[str], bool], str]] = [
+            ("length_check", lambda s: 0 < len(s.strip()) <= 256, "Input exceeds maximum length (256 chars)"),
+            ("sanitation", lambda s: not any(c in s for c in [";", "&&", "||", "`"]), "Forbidden injection characters detected"),
+            ("structure", lambda s: bool(s.strip().split()), "Input cannot be empty or whitespace only"),
+        ]
 
-    def __init__(self, delimiter: str = "."):
-        self.delimiter = delimiter
+    def validate(self, raw: str) -> Dict[str, Any]:
+        cleaned = raw.strip()
+        for name, check, error_msg in self.validators:
+            if not check(cleaned):
+                return {"is_valid": False, "error": f"[{name}] {error_msg}", "data": None}
+        
+        parts = cleaned.split()
+        return {
+            "is_valid": True,
+            "error": None,
+            "data": {"cmd": parts[0].lower(), "args": parts[1:], "raw": cleaned}
+        }
 
-    def flatten(self, data: Any, prefix: str = "") -> Generator[Tuple[str, Any], None, None]:
-        """Recursively flattens arbitrarily nested data structures."""
-        if isinstance(data, dict):
-            for key, val in data.items():
-                next_key = f"{prefix}{self.delimiter}{key}" if prefix else str(key)
-                yield from self.flatten(val, next_key)
-        elif isinstance(data, (list, tuple, set)):
-            for index, item in enumerate(data):
-                next_key = f"{prefix}[{index}]"
-                yield from self.flatten(item, next_key)
-        else:
-            yield (prefix, data)
+class LoopProcessor:
+    def __init__(self):
+        self.pipeline = InputValidatorPipeline()
 
-    def transform(self, data: Any, filter_term: Union[str, None] = None) -> Dict[str, Any]:
-        """Transforms data into key-value map with optional fuzzy filter."""
-        flattened = dict(self.flatten(data))
-        if not filter_term:
-            return flattened
-        term = filter_term.lower()
-        return {k: v for k, v in flattened.items() if term in k.lower() or term in str(v).lower()}
+    def run_loop(self, stream: List[str]) -> Generator[str, None, None]:
+        """Process stream items through validation pipeline."""
+        for idx, raw_input in enumerate(stream, start=1):
+            result = self.pipeline.validate(raw_input)
+            if not result["is_valid"]:
+                yield f"Line {idx} Error: {result['error']}"
+                continue
 
+            payload = result["data"]
+            if payload["cmd"] in ("exit", "quit"):
+                yield f"Line {idx}: Termination requested."
+                break
 
-def format_for_display(payload: Any, filter_term: Union[str, None] = None) -> str:
-    """Utility function to parse and format data for terminal output."""
-    if isinstance(payload, str):
-        try:
-            payload = json.loads(payload)
-        except json.JSONDecodeError:
-            payload = {"text": payload}
-
-    processor = DataStreamProcessor()
-    results = processor.transform(payload, filter_term)
-
-    if not results:
-        return "No matching records found."
-
-    max_key_len = max(len(k) for k in results.keys())
-    return "\n".join(f"{k.ljust(max_key_len)} : {v}" for k, v in results.items())
+            yield f"Line {idx} Processed: command='{payload['cmd']}', args={payload['args']}"
