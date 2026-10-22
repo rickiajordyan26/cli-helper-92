@@ -1,65 +1,41 @@
-"""Terminal text styling and pipeline transformation utilities for CLI interfaces."""
+import json
+from typing import Any, Dict, List, Union, Optional
+from functools import reduce
 
-from typing import Callable, Iterable, Generator, Any, Self, TypeVar
-
-T = TypeVar("T")
-
-class AnsiPipeline:
-    """An overload-heavy string formatter for terminal pipelines.
-    
-    Allows chaining ANSI color codes and transformations using bitwise OR `|`
-    and shift `>>` operators for creative terminal stream formatting.
+def deep_fetch(data: Union[Dict, List], path: str, default: Any = None) -> Any:
     """
+    Navigates a nested structure using dot notation keys.
+    Example: deep_fetch(data, 'user.profile.id')
+    """
+    keys = path.split('.')
+    try:
+        return reduce(lambda d, k: d[int(k)] if isinstance(d, list) else d.get(k), keys, data)
+    except (KeyError, TypeError, IndexError, ValueError):
+        return default
 
-    CODES: dict[str, str] = {
-        "bold": "\033[1m",
-        "red": "\033[31m",
-        "green": "\033[32m",
-        "yellow": "\033[33m",
-        "blue": "\033[34m",
-        "reset": "\033[0m",
+def sanitize_payload(payload: Dict[str, Any], keys_to_scrub: List[str]) -> Dict[str, Any]:
+    """
+    Recursively purges sensitive keys from a dictionary.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    
+    return {
+        k: ('***' if k in keys_to_scrub else sanitize_payload(v, keys_to_scrub))
+        for k, v in payload.items()
     }
 
-    def __init__(self, text: str = "") -> None:
-        self.text: str = text
-        self._styles: list[str] = []
-
-    def __or__(self, style_name: str) -> Self:
-        """Applies a named ANSI code style to the pipeline instance via `|`."""
-        if style_name in self.CODES:
-            self._styles.append(self.CODES[style_name])
-        return self
-
-    def __rshift__(self, transform: Callable[[str], str]) -> Self:
-        """Applies a string transformation function using the `>>` operator."""
-        self.text = transform(self.text)
-        return self
-
-    def render(self) -> str:
-        """Renders the final styled string wrapped with ANSI escape sequences."""
-        prefix = "".join(self._styles)
-        suffix = self.CODES["reset"] if self._styles else ""
-        return f"{prefix}{self.text}{suffix}"
-
-    def __str__(self) -> str:
-        return self.render()
-
-
-def format_stream(items: Iterable[Any], style: str = "green") -> Generator[str, None, None]:
-    """Yields stream items decorated as styled string pipeline outputs.
-
-    Args:
-        items: An iterable collection of raw objects to format.
-        style: The name of the ANSI color style to apply.
-
-    Yields:
-        Rendered ANSI strings for terminal output.
+def batch_process(items: List[Any], chunk_size: int = 10):
     """
-    for item in items:
-        pipeline = AnsiPipeline(str(item)) | style | "bold"
-        yield pipeline.render()
+    Yields successive chunks from a list.
+    """
+    for i in range(0, len(items), chunk_size):
+        yield items[i:i + chunk_size]
 
-
-def smart_truncate(text: str, max_len: int = 20) -> str:
-    """Truncates text nicely with an ellipsis if it exceeds length limit."""
-    return text[: max_len - 3] + "..." if len(text) > max_len else text
+def stringify_if_json(data: Any) -> str:
+    """
+    Attempts to serialize complex objects as json.
+    """
+    if isinstance(data, (dict, list)):
+        return json.dumps(data, sort_keys=True)
+    return str(data)
