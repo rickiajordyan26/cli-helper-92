@@ -1,39 +1,68 @@
-import os
 import json
-from typing import Any, Dict
+import os
+from collections import ChainMap
+from pathlib import Path
+from typing import Any, Dict, Union
 
-class ConfigLoader:
-    """A whimsical configuration loader using lazy property patterns."""
-    def __init__(self, filepath: str = "config.json", defaults: Dict[str, Any] = None):
-        self.filepath = filepath
-        self._defaults = defaults or {}
-        self._data = {}
 
-    def __getattr__(self, name: str) -> Any:
-        if not self._data:
-            self._load()
-        return self._data.get(name, self._defaults.get(name))
+class CascadingConfig:
+    """Dynamic configuration cascade resolving defaults, file configs, and environment overrides."""
 
-    def _load(self) -> None:
-        try:
-            if os.path.exists(self.filepath):
-                with open(self.filepath, "r") as f:
-                    self._data = json.load(f)
-            else:
-                self._write_defaults()
-        except (json.JSONDecodeError, IOError):
-            self._data = self._defaults
+    def __init__(self, defaults: Dict[str, Any], env_prefix: str = "CLI_"):
+        self._defaults = defaults
+        self._env_prefix = env_prefix
+        self._file_config: Dict[str, Any] = {}
+        self._runtime_overrides: Dict[str, Any] = {}
+        self._rebuild_chain()
 
-    def _write_defaults(self) -> None:
-        try:
-            with open(self.filepath, "w") as f:
-                json.dump(self._defaults, f, indent=4)
-            self._data = self._defaults
-        except IOError:
-            pass
+    def _rebuild_chain(self) -> None:
+        env_map = {}
+        for key, val in self._defaults.items():
+            env_key = f"{self._env_prefix}{key.upper()}"
+            if env_key in os.environ:
+                raw_val = os.environ[env_key]
+                target_type = type(val)
+                try:
+                    if target_type == bool:
+                        env_map[key] = raw_val.lower() in ("1", "true", "yes")
+                    else:
+                        env_map[key] = target_type(raw_val)
+                except (ValueError, TypeError):
+                    env_map[key] = raw_val
 
-    def reload(self) -> None:
-        self._data = {}
+        self._chain = ChainMap(self._runtime_overrides, env_map, self._file_config, self._defaults)
 
-def get_config(defaults: Dict[str, Any] = None) -> ConfigLoader:
-    return ConfigLoader(defaults=defaults or {})
+    def load_file(self, path: Union[str, Path]) -> "CascadingConfig":
+        filepath = Path(path)
+        if filepath.is_file():
+            with open(filepath, "r", encoding="utf-8") as f:
+                self._file_config = json.load(f)
+            self._rebuild_chain()
+        return self
+
+    def override(self, **kwargs: Any) -> "CascadingConfig":
+        self._runtime_overrides.update(kwargs)
+        self._rebuild_chain()
+        return self
+
+    def __getattr__(self, item: str) -> Any:
+        if item in self._chain:
+            return self._chain[item]
+        raise AttributeError(f"Configuration key '{item}' not found")
+
+    def __getitem__(self, item: str) -> Any:
+        return self._chain[item]
+
+    def as_dict(self) -> Dict[str, Any]:
+        return dict(self._chain)
+
+
+DEFAULT_CONFIG = {
+    "theme": "dark",
+    "timeout": 30,
+    "verbose": False,
+    "max_retries": 3,
+    "output_format": "json",
+}
+
+config = CascadingConfig(defaults=DEFAULT_CONFIG)
