@@ -1,39 +1,46 @@
-import sys
-import logging
-from typing import Callable, Any, Optional
+import re
+from typing import Any, Generator, Tuple, List, Dict
 
-logging.basicConfig(level=logging.ERROR)
-logger = logging.getLogger('cli-helper-92')
 
-class ExecutionContext:
-    def __init__(self, fallback: Any = None):
-        self.fallback = fallback
+class NestedDataCascade:
+    """Dynamic cascade wrapper for querying and transforming nested data structures."""
 
-def handle_edge_cases(func: Callable):
-    """Decorator injecting a resilient protective barrier around functions."""
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        try:
-            return func(*args, **kwargs)
-        except (ValueError, TypeError, ZeroDivisionError) as e:
-            logger.error(f'Edge case triggered: {type(e).__name__} -> {e}')
-            return None
-        except Exception as e:
-            logger.critical(f'Unexpected system instability: {e}')
-            return ExecutionContext().fallback
-    return wrapper
+    def __init__(self, data: Any):
+        self.raw_data = data
 
-@handle_edge_cases
-def secure_compute(value: Any) -> float:
-    """Perform dangerous arithmetic with safety net."""
-    if not isinstance(value, (int, float)):
-        raise TypeError('Invalid input type for arithmetic operation')
-    return 100 / value
+    def stream(self, node: Any = None, prefix: str = "") -> Generator[Tuple[str, Any], None, None]:
+        """Recursively unroll data into dotted path-value pairs."""
+        current = self.raw_data if node is None and prefix == "" else node
+        
+        if isinstance(current, dict):
+            for key, val in current.items():
+                path = f"{prefix}.{key}" if prefix else str(key)
+                yield from self.stream(val, path)
+        elif isinstance(current, (list, tuple)):
+            for idx, val in enumerate(current):
+                path = f"{prefix}[{idx}]"
+                yield from self.stream(val, path)
+        else:
+            yield (prefix, current)
 
-def robust_processor(data: list) -> list:
-    """Batch process with individual failure isolation."""
-    results = []
-    for item in data:
-        res = secure_compute(item)
-        if res is not None:
-            results.append(res)
-    return results
+    def query(self, pattern: str) -> List[Tuple[str, Any]]:
+        """Query nodes matching wildcards in path standard."""
+        regex_pattern = "^" + pattern.replace(".", r"\.").replace("*", r"[^.\[\]]+") + "$"
+        matcher = re.compile(regex_pattern)
+        return [(path, val) for path, val in self.stream() if matcher.match(path)]
+
+    def compact(self, delimiter: str = ".") -> Dict[str, Any]:
+        """Flatten nested structure into single-level dictionary."""
+        flat = {}
+        for path, val in self.stream():
+            normalized_key = path.replace("[", delimiter).replace("]", "")
+            flat[normalized_key] = val
+        return flat
+
+
+def process_nested_data(data: Any, pattern: str = "*") -> Dict[str, Any]:
+    """Utility entrypoint for handling structured data cascading."""
+    cascade = NestedDataCascade(data)
+    if pattern == "*":
+        return cascade.compact()
+    return dict(cascade.query(pattern))
