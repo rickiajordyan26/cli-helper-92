@@ -1,45 +1,51 @@
-import functools
-import time
-import json
-from typing import Callable, Any
+from typing import Any, Generator, Dict, Tuple, Callable
 
-def memoize_with_expiry(ttl_seconds: int = 60):
-    def decorator(func: Callable):
-        cache = {}
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = (args, frozenset(kwargs.items()))
-            now = time.time()
-            if key in cache and (now - cache[key]['ts']) < ttl_seconds:
-                return cache[key]['val']
-            result = func(*args, **kwargs)
-            cache[key] = {'val': result, 'ts': now}
-            return result
-        return wrapper
-    return decorator
 
-def deep_flatten(items: list) -> list:
-    flat = []
-    for item in items:
-        if isinstance(item, list):
-            flat.extend(deep_flatten(item))
-        else:
-            flat.append(item)
-    return flat
+class TreeStream:
+    """Stream-based nested data structure transformer and flattener."""
 
-def serialize_safe(data: Any) -> str:
-    try:
-        return json.dumps(data)
-    except (TypeError, ValueError):
-        return str(data)
+    def __init__(self, data: Any, delimiter: str = "."):
+        self.raw_data = data
+        self.delimiter = delimiter
 
-def pipeline(*functions: Callable):
-    def executor(data: Any):
-        return functools.reduce(lambda acc, f: f(acc), functions, data)
-    return executor
+    def flatten(self) -> Generator[Tuple[str, Any], None, None]:
+        """Recursively yields path-value pairs for nested structures."""
+        def _walk(node: Any, prefix: Tuple[str, ...]) -> Generator[Tuple[str, Any], None, None]:
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    yield from _walk(v, prefix + (str(k),))
+            elif isinstance(node, (list, tuple)):
+                for idx, v in enumerate(node):
+                    yield from _walk(v, prefix + (f"[{idx}]",))
+            else:
+                yield self.delimiter.join(prefix), node
 
-if __name__ == '__main__':
-    double = lambda x: x * 2
-    add_ten = lambda x: x + 10
-    process = pipeline(double, add_ten)
-    print(f'Pipeline output: {process(5)}')
+        yield from _walk(self.raw_data, ())
+
+    def transform(self, mapper: Callable[[str, Any], Tuple[str, Any]]) -> Dict[str, Any]:
+        """Applies transformation mapping over key paths and leaf values."""
+        result: Dict[str, Any] = {}
+        for path, val in self.flatten():
+            new_path, new_val = mapper(path, val)
+            if new_path:
+                result[new_path] = new_val
+        return result
+
+    @classmethod
+    def rebuild(cls, flattened: Dict[str, Any], delimiter: str = ".") -> Dict[str, Any]:
+        """Reconstructs a nested dictionary structure from path keys."""
+        root: Dict[str, Any] = {}
+        for path, val in flattened.items():
+            parts = path.split(delimiter)
+            curr = root
+            for part in parts[:-1]:
+                curr = curr.setdefault(part, {})
+            curr[parts[-1]] = val
+        return root
+
+
+def process_nested_data(data: Any, key_transform: Callable[[str], str] = str.lower) -> Dict[str, Any]:
+    """Utility function to normalize and re-structure nested payload data."""
+    stream = TreeStream(data)
+    transformed = stream.transform(lambda p, v: (key_transform(p), v))
+    return TreeStream.rebuild(transformed)
