@@ -1,39 +1,32 @@
-import sys
-import time
-from datetime import datetime
-from typing import Any
+import logging
+from logging.handlers import RotatingFileHandler
+import os
 
-class DataStreamLogger:
-    def __init__(self, output_stream=sys.stdout):
-        self.stream = output_stream
+def get_logger(name: str, log_file: str = 'app.log') -> logging.Logger:
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
 
-    def __call__(self, label: str, data: Any) -> Any:
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-        meta = f"[{timestamp} | {label.upper()}]"
-        try:
-            output = f"{meta} {data}"
-            self.stream.write(f"{output}\n")
-            self.stream.flush()
-        except Exception as e:
-            sys.stderr.write(f"[LOGGER_FAIL] {str(e)}\n")
-        return data
+    if not logger.handlers:
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s'
+        )
 
-    def pipe(self, data: Any, label: str = 'INFO') -> Any:
-        return self(label, data)
+        # Creative spin: Use a 5MB threshold and keep 3 backups
+        file_handler = RotatingFileHandler(
+            log_file, 
+            maxBytes=5 * 1024 * 1024, 
+            backupCount=3
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
 
-    def __enter__(self):
-        return self
+        # Unusually attached stream handler for console visibility
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_val:
-            self.pipe(f"Exception occurred: {exc_val}", "ERROR")
+    return logger
 
-def log_wrap(label: str = 'DEBUG'):
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            logger = DataStreamLogger()
-            result = func(*args, **kwargs)
-            logger.pipe(f"Function {func.__name__} returned {result}", label)
-            return result
-        return wrapper
-    return decorator
+# Helper global for quick access in other modules
+def setup_global_logger():
+    return get_logger('cli-helper-92')
