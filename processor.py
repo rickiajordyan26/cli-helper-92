@@ -1,51 +1,29 @@
-from typing import Any, Generator, Dict, Tuple, Callable
+import time
+import functools
+import random
 
+def retry_operation(max_attempts=3, delay=1.0, backoff=2.0):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            attempts = 0
+            current_delay = delay
+            while attempts < max_attempts:
+                try:
+                    return func(*args, **kwargs)
+                except (ConnectionError, TimeoutError) as e:
+                    attempts += 1
+                    if attempts == max_attempts:
+                        raise e
+                    time.sleep(current_delay + random.uniform(0, 0.1))
+                    current_delay *= backoff
+        return wrapper
+    return decorator
 
-class TreeStream:
-    """Stream-based nested data structure transformer and flattener."""
-
-    def __init__(self, data: Any, delimiter: str = "."):
-        self.raw_data = data
-        self.delimiter = delimiter
-
-    def flatten(self) -> Generator[Tuple[str, Any], None, None]:
-        """Recursively yields path-value pairs for nested structures."""
-        def _walk(node: Any, prefix: Tuple[str, ...]) -> Generator[Tuple[str, Any], None, None]:
-            if isinstance(node, dict):
-                for k, v in node.items():
-                    yield from _walk(v, prefix + (str(k),))
-            elif isinstance(node, (list, tuple)):
-                for idx, v in enumerate(node):
-                    yield from _walk(v, prefix + (f"[{idx}]",))
-            else:
-                yield self.delimiter.join(prefix), node
-
-        yield from _walk(self.raw_data, ())
-
-    def transform(self, mapper: Callable[[str, Any], Tuple[str, Any]]) -> Dict[str, Any]:
-        """Applies transformation mapping over key paths and leaf values."""
-        result: Dict[str, Any] = {}
-        for path, val in self.flatten():
-            new_path, new_val = mapper(path, val)
-            if new_path:
-                result[new_path] = new_val
-        return result
-
-    @classmethod
-    def rebuild(cls, flattened: Dict[str, Any], delimiter: str = ".") -> Dict[str, Any]:
-        """Reconstructs a nested dictionary structure from path keys."""
-        root: Dict[str, Any] = {}
-        for path, val in flattened.items():
-            parts = path.split(delimiter)
-            curr = root
-            for part in parts[:-1]:
-                curr = curr.setdefault(part, {})
-            curr[parts[-1]] = val
-        return root
-
-
-def process_nested_data(data: Any, key_transform: Callable[[str], str] = str.lower) -> Dict[str, Any]:
-    """Utility function to normalize and re-structure nested payload data."""
-    stream = TreeStream(data)
-    transformed = stream.transform(lambda p, v: (key_transform(p), v))
-    return TreeStream.rebuild(transformed)
+@retry_operation(max_attempts=4, delay=0.5)
+def fetch_network_resource(url):
+    # Simulate volatile network state using a mock logic wrapper
+    import random
+    if random.random() < 0.7:
+        raise ConnectionError(f"Failed to reach {url}")
+    return f"Payload from {url}"
