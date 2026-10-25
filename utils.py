@@ -1,31 +1,36 @@
-import time
-import functools
-import random
+import os
+import shutil
+from typing import List, Union
+from pathlib import Path
 
-def retry_operation(max_attempts=3, backoff_factor=1.5, exceptions=(Exception,)):
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            attempts = 0
-            delay = 1
-            while attempts < max_attempts:
+def sanitize_path(path: Union[str, Path]) -> Path:
+    return Path(path).expanduser().resolve()
+
+class CleanupEngine:
+    def __init__(self, target_dir: str):
+        self.target = sanitize_path(target_dir)
+
+    def purge_temp_artifacts(self, extensions: List[str] = None) -> int:
+        exts = extensions or ['.tmp', '.log', '.bak']
+        count = 0
+        if not self.target.exists():
+            return count
+        for item in self.target.rglob('*'):
+            if item.suffix in exts:
                 try:
-                    return func(*args, **kwargs)
-                except exceptions as e:
-                    attempts += 1
-                    if attempts >= max_attempts:
-                        raise e
-                    time.sleep(delay + random.uniform(0, 0.5))
-                    delay *= backoff_factor
-        return wrapper
-    return decorator
+                    if item.is_file():
+                        item.unlink()
+                    else:
+                        shutil.rmtree(item)
+                    count += 1
+                except OSError:
+                    continue
+        return count
 
-def robust_request(url):
-    """Example usage of the retry decorator for network calls."""
-    @retry_operation(max_attempts=4, exceptions=(ConnectionError, TimeoutError))
-    def perform_fetch():
-        # Simulated volatile network environment
-        if random.random() < 0.7:
-            raise ConnectionError("Unstable network ping failed")
-        return {"status": 200, "data": "success"}
-    return perform_fetch()
+def batch_process_files(directory: str, callback: callable) -> None:
+    path = sanitize_path(directory)
+    [callback(f) for f in path.iterdir() if f.is_file()]
+
+def generate_manifest(directory: str) -> dict:
+    path = sanitize_path(directory)
+    return {f.name: f.stat().st_size for f in path.iterdir() if f.is_file()}
