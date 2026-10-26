@@ -1,33 +1,46 @@
-import re
-from typing import Any, Callable, Dict, Optional
+"""Validator descriptors and pipeline helpers for CLI input stream checking."""
+
+from typing import Callable, Any, TypeVar, Generic
+
+T = TypeVar('T')
+
+class Rule(Generic[T]):
+    """A composable validation rule wrapping a predicate function."""
+
+    def __init__(self, predicate: Callable[[T], bool], message: str) -> None:
+        """Initialize a rule with a predicate and failure message."""
+        self.predicate = predicate
+        self.message = message
+
+    def __call__(self, value: T) -> bool:
+        """Evaluate the rule predicate against the given value."""
+        return self.predicate(value)
+
+    def __and__(self, other: 'Rule[T]') -> 'Rule[T]':
+        """Combine two rules into a logical AND chain."""
+        return Rule(
+            lambda val: self(val) and other(val),
+            f"{self.message} & {other.message}"
+        )
+
 
 class InputValidator:
-    def __init__(self):
-        self._rules: Dict[str, Callable[[Any], bool]] = {
-            'non_empty': lambda x: bool(str(x).strip()),
-            'numeric': lambda x: str(x).isdigit(),
-            'alphanumeric': lambda x: bool(re.match(r'^[a-zA-Z0-9]+$', str(x))),
-            'length_gt_3': lambda x: len(str(x)) > 3
-        }
+    """Runtime validator instance leveraging composable Rule objects."""
 
-    def validate(self, data: Any, rules: list) -> bool:
-        try:
-            return all(self._rules[rule](data) for rule in rules)
-        except (KeyError, TypeError):
-            return False
+    def __init__(self, *rules: Rule[Any]) -> None:
+        """Construct validator with a sequence of validation rules."""
+        self._rules: list[Rule[Any]] = list(rules)
 
-    def register_rule(self, name: str, func: Callable[[Any], bool]) -> None:
-        self._rules[name] = func
+    def validate(self, payload: Any) -> tuple[bool, list[str]]:
+        """Validate payload against all rules, returning status and errors."""
+        errors: list[str] = [
+            rule.message for rule in self._rules if not rule(payload)
+        ]
+        return (len(errors) == 0, errors)
 
-def run_validation_cycle(data: Any, schema: Dict[str, list]) -> Dict[str, bool]:
-    validator = InputValidator()
-    results = {}
-    for key, rules in schema.items():
-        results[key] = validator.validate(data.get(key), rules)
-    return results
 
-# Dynamic wrapper for main loops
-def validate_loop_input(data: Any, schema: Dict[str, list]) -> Optional[Dict[str, Any]]:
-    if not all(run_validation_cycle(data, schema).values()):
-        raise ValueError(f"Validation failed for input: {data}")
-    return data
+is_non_empty: Rule[str] = Rule(lambda s: bool(s and s.strip()), "Value cannot be empty")
+is_alphanumeric: Rule[str] = Rule(lambda s: str(s).isalnum(), "Value must be alphanumeric")
+is_cli_flag: Rule[str] = Rule(lambda s: str(s).startswith("--") and len(s) > 2, "Must be valid CLI flag")
+
+valid_option_name: Rule[str] = is_non_empty & Rule(lambda s: not str(s).startswith("-"), "Option name cannot start with hyphen")
