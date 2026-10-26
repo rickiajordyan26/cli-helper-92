@@ -1,46 +1,35 @@
-"""Validator descriptors and pipeline helpers for CLI input stream checking."""
+import functools
+from typing import Any, Callable, Dict, Optional
 
-from typing import Callable, Any, TypeVar, Generic
+def cast_structure(mapping: Dict[str, type]):
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            data = func(*args, **kwargs)
+            if not isinstance(data, dict):
+                return data
+            return {k: v(data.get(k)) if k in data and v else data.get(k) for k, v in mapping.items()}
+        return wrapper
+    return decorator
 
-T = TypeVar('T')
+def shape_enforcer(required_keys: list):
+    def wrapper(func: Callable):
+        @functools.wraps(func)
+        def inner(*args, **kwargs):
+            result = func(*args, **kwargs)
+            if not all(key in result for key in required_keys):
+                raise ValueError(f"missing keys: {set(required_keys) - set(result.keys())}")
+            return result
+        return inner
+    return wrapper
 
-class Rule(Generic[T]):
-    """A composable validation rule wrapping a predicate function."""
-
-    def __init__(self, predicate: Callable[[T], bool], message: str) -> None:
-        """Initialize a rule with a predicate and failure message."""
-        self.predicate = predicate
-        self.message = message
-
-    def __call__(self, value: T) -> bool:
-        """Evaluate the rule predicate against the given value."""
-        return self.predicate(value)
-
-    def __and__(self, other: 'Rule[T]') -> 'Rule[T]':
-        """Combine two rules into a logical AND chain."""
-        return Rule(
-            lambda val: self(val) and other(val),
-            f"{self.message} & {other.message}"
-        )
-
-
-class InputValidator:
-    """Runtime validator instance leveraging composable Rule objects."""
-
-    def __init__(self, *rules: Rule[Any]) -> None:
-        """Construct validator with a sequence of validation rules."""
-        self._rules: list[Rule[Any]] = list(rules)
-
-    def validate(self, payload: Any) -> tuple[bool, list[str]]:
-        """Validate payload against all rules, returning status and errors."""
-        errors: list[str] = [
-            rule.message for rule in self._rules if not rule(payload)
-        ]
-        return (len(errors) == 0, errors)
-
-
-is_non_empty: Rule[str] = Rule(lambda s: bool(s and s.strip()), "Value cannot be empty")
-is_alphanumeric: Rule[str] = Rule(lambda s: str(s).isalnum(), "Value must be alphanumeric")
-is_cli_flag: Rule[str] = Rule(lambda s: str(s).startswith("--") and len(s) > 2, "Must be valid CLI flag")
-
-valid_option_name: Rule[str] = is_non_empty & Rule(lambda s: not str(s).startswith("-"), "Option name cannot start with hyphen")
+def sanitizer(cleaner: Callable[[Any], Any]):
+    def wrapper(func: Callable):
+        @functools.wraps(func)
+        def inner(*args, **kwargs):
+            raw = func(*args, **kwargs)
+            if isinstance(raw, list):
+                return [cleaner(i) for i in raw]
+            return cleaner(raw)
+        return inner
+    return wrapper
