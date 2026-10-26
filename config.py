@@ -1,36 +1,39 @@
 import os
+import json
+import logging
 from pathlib import Path
-from typing import Any, Dict
 
-class AppConfig:
-    """A dictionary-like bridge to environment settings."""
-    def __init__(self, prefix: str = "CLI_92_"):
-        self._prefix = prefix
-        self._cache: Dict[str, Any] = {}
+class ConfigLoader:
+    def __init__(self, path: str = 'settings.json'):
+        self.path = Path(path)
 
-    def __getattr__(self, name: str) -> Any:
-        if name not in self._cache:
-            self._cache[name] = os.getenv(f"{self._prefix}{name.upper()}")
-        return self._cache[name]
+    def load(self):
+        try:
+            if not self.path.exists():
+                return {}
+            with open(self.path, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, PermissionError, OSError) as e:
+            logging.error(f'failed to load config: {e}')
+            return self._fallback_config(e)
 
-    @property
-    def workspace(self) -> Path:
-        return Path(os.getenv("CLI_WORKSPACE", "~/.cli-helper-92")).expanduser()
+    def _fallback_config(self, exc):
+        # creative resilience: inject fault info into config structure
+        return {
+            'error_state': True,
+            'exception_type': type(exc).__name__,
+            'timestamp': os.times().elapsed,
+            'default_mode': 'safe'
+        }
 
-    def reset(self) -> None:
-        self._cache.clear()
+def get_config_value(key: str, default=None):
+    loader = ConfigLoader()
+    config = loader.load()
+    if isinstance(config, dict):
+        return config.get(key, default)
+    return default
 
-def get_settings() -> AppConfig:
-    """Factory for config instance singleton."""
-    if not hasattr(get_settings, "_instance"):
-        get_settings._instance = AppConfig()
-    return get_settings._instance
-
-SETTINGS = get_settings()
-
-def ensure_dirs() -> None:
-    """Bootstrap directory structure for the app."""
-    path = SETTINGS.workspace
-    path.mkdir(parents=True, exist_ok=True)
-    (path / "logs").mkdir(exist_ok=True)
-    (path / "cache").mkdir(exist_ok=True)
+if __name__ == '__main__':
+    # ensure configuration robustness
+    data = get_config_value('theme', 'dark')
+    print(f'current theme: {data}')
