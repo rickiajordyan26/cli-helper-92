@@ -1,16 +1,19 @@
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 # cli-helper-92
 
-`cli-helper-92` is a lightweight Python utility designed to streamline command-line interactions and automate repetitive terminal workflows. It provides a robust wrapper for handling common CLI tasks, ensuring your scripts remain clean, readable, and maintainable.
+`cli-helper-92` is a lightweight Python command-line utility designed to automate repetitive terminal workflows and standardize output formatting across developer environments. It seamlessly manages command execution presets, transforms standard stdout into structured formats, and tracks terminal session analytics without requiring heavy shell reconfigurations.
 
-### Features
-* **Interactive Prompt Engine**: Simplifies the creation of complex user input flows with built-in validation and auto-completion.
-* **Config Persistence**: Automatically manages local JSON/YAML configuration files to maintain user state across sessions.
-* **Streamlined Logging**: Implements pre-configured color-coded logging levels to track process execution without cluttering standard output.
-* **Sub-command Routing**: Offers a declarative decorator pattern to handle complex argument parsing and multi-level command nesting.
+## Features
 
-### Installation
+* **Context-Aware Execution:** Automatically injects pre-configured environment variables and flags based on your current working directory.
+* **Structured Output Pipeline:** Pipes and converts raw terminal outputs directly into clean JSON, YAML, or formatted ASCII tables.
+* **Interactive Command Presets:** Save, tag, and parameterize multi-step shell scripts into single executable commands with built-in argument validation.
+* **Execution Audit Logs:** Tracks runtime metrics, exit codes, and output histories in a local SQLite database for quick debugging.
 
-Requires Python 3.8+ and `pip`. Install the package directly from PyPI:
+## Installation
+
+Install directly via `pip`:
 
 ```bash
 pip install cli-helper-92
@@ -21,33 +24,29 @@ Alternatively, install from source:
 ```bash
 git clone https://github.com/Developer/cli-helper-92.git
 cd cli-helper-92
-pip install .
+pip install -e .
 ```
 
-### Usage
+## Quick Start
 
-Integrate `cli-helper-92` into your project to handle argument parsing and interactive setup in seconds:
-
-```python
-from cli_helper_92 import CLIApp
-
-app = CLIApp(name="MyTool", version="1.0.0")
-
-@app.command(help="Greet the user")
-def greet(name: str = "User"):
-    app.logger.info(f"Hello, {name}!")
-
-if __name__ == "__main__":
-    app.run()
-```
-
-Run your tool from the terminal:
+Save a multi-flag command as a reusable preset:
 
 ```bash
-python main.py greet --name "Developer"
+cli-helper preset add build-image --cmd "docker build -t service:v1 . && docker scan service:v1"
 ```
 
-### License
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+Execute a preset and convert the output directly to JSON format:
 
-This project is licensed under the terms of the MIT License.
+```bash
+cli-helper run build-image --format json
+```
+
+View execution logs for recent runs:
+
+```bash
+cli-helper history --limit 5
+```
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for full details.
