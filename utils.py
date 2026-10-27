@@ -1,36 +1,52 @@
-import os
-import shutil
-from typing import List, Union
-from pathlib import Path
+import sys
+import functools
+from typing import Callable, Any, Dict, Optional
 
-def sanitize_path(path: Union[str, Path]) -> Path:
-    return Path(path).expanduser().resolve()
+class ExecutionDegraded(UserWarning):
+    """Warning emitted when an operation falls back to a safe stub."""
+    pass
 
-class CleanupEngine:
-    def __init__(self, target_dir: str):
-        self.target = sanitize_path(target_dir)
+def resilient_execution(
+    fallback_value: Any = None,
+    suppress: tuple = (Exception,),
+    telemetry_store: Optional[Dict[str, int]] = None
+) -> Callable:
+    """Decorator intercepting edge-case exceptions with dynamic safe fallbacks."""
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return func(*args, **kwargs)
+            except suppress as err:
+                if telemetry_store is not None:
+                    err_key = err.__class__.__name__
+                    telemetry_store[err_key] = telemetry_store.get(err_key, 0) + 1
+                
+                if isinstance(err, (BrokenPipeError, KeyboardInterrupt)):
+                    try:
+                        sys.stderr.close()
+                    except Exception:
+                        pass
+                    sys.exit(130 if isinstance(err, KeyboardInterrupt) else 0)
+                
+                if isinstance(err, UnicodeDecodeError):
+                    raw = getattr(err, 'object', b'')
+                    if isinstance(raw, bytes):
+                        return raw.decode('utf-8', errors='replace')
 
-    def purge_temp_artifacts(self, extensions: List[str] = None) -> int:
-        exts = extensions or ['.tmp', '.log', '.bak']
-        count = 0
-        if not self.target.exists():
-            return count
-        for item in self.target.rglob('*'):
-            if item.suffix in exts:
-                try:
-                    if item.is_file():
-                        item.unlink()
-                    else:
-                        shutil.rmtree(item)
-                    count += 1
-                except OSError:
-                    continue
-        return count
+                if callable(fallback_value):
+                    return fallback_value(err, *args, **kwargs)
+                return fallback_value
+        return wrapper
+    return decorator
 
-def batch_process_files(directory: str, callback: callable) -> None:
-    path = sanitize_path(directory)
-    [callback(f) for f in path.iterdir() if f.is_file()]
-
-def generate_manifest(directory: str) -> dict:
-    path = sanitize_path(directory)
-    return {f.name: f.stat().st_size for f in path.iterdir() if f.is_file()}
+def safe_cli_stream(stream_func: Callable) -> Callable:
+    """Wraps CLI generators to swallow stream crashes cleanly."""
+    @functools.wraps(stream_func)
+    def generator_wrapper(*args: Any, **kwargs: Any):
+        try:
+            yield from stream_func(*args, **kwargs)
+        except (EOFError, StopIteration, MemoryError) as exc:
+            sys.stderr.write(f"\n[cli-helper] Stream interrupted: {exc}\n")
+            return
+    return generator_wrapper
