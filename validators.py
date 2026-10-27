@@ -1,35 +1,39 @@
 import functools
-from typing import Any, Callable, Dict, Optional
+import time
 
-def cast_structure(mapping: Dict[str, type]):
-    def decorator(func: Callable):
+class MemoizedValidator:
+    def __init__(self, ttl=300):
+        self.cache = {}
+        self.ttl = ttl
+
+    def __call__(self, func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            data = func(*args, **kwargs)
-            if not isinstance(data, dict):
-                return data
-            return {k: v(data.get(k)) if k in data and v else data.get(k) for k, v in mapping.items()}
-        return wrapper
-    return decorator
-
-def shape_enforcer(required_keys: list):
-    def wrapper(func: Callable):
-        @functools.wraps(func)
-        def inner(*args, **kwargs):
+            key = (args, frozenset(kwargs.items()))
+            now = time.time()
+            if key in self.cache:
+                res, ts = self.cache[key]
+                if now - ts < self.ttl:
+                    return res
             result = func(*args, **kwargs)
-            if not all(key in result for key in required_keys):
-                raise ValueError(f"missing keys: {set(required_keys) - set(result.keys())}")
+            self.cache[key] = (result, now)
             return result
-        return inner
-    return wrapper
+        return wrapper
 
-def sanitizer(cleaner: Callable[[Any], Any]):
-    def wrapper(func: Callable):
-        @functools.wraps(func)
-        def inner(*args, **kwargs):
-            raw = func(*args, **kwargs)
-            if isinstance(raw, list):
-                return [cleaner(i) for i in raw]
-            return cleaner(raw)
-        return inner
-    return wrapper
+def fast_input_check(func):
+    cache = {}
+    def inner(*args):
+        if args not in cache:
+            cache[args] = func(*args)
+        return cache[args]
+    return inner
+
+@MemoizedValidator(ttl=60)
+def validate_config_schema(schema_id: str) -> bool:
+    # Simulate expensive regex validation
+    time.sleep(0.5)
+    return schema_id.startswith('v_') and len(schema_id) > 5
+
+@fast_input_check
+def validate_permission_level(level: int) -> bool:
+    return 0 <= level <= 100
