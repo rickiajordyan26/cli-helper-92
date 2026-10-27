@@ -1,41 +1,34 @@
-import json
-from typing import Any, Dict, List, Union, Optional
-from functools import reduce
+import functools
+import logging
+import sys
 
-def deep_fetch(data: Union[Dict, List], path: str, default: Any = None) -> Any:
-    """
-    Navigates a nested structure using dot notation keys.
-    Example: deep_fetch(data, 'user.profile.id')
-    """
-    keys = path.split('.')
-    try:
-        return reduce(lambda d, k: d[int(k)] if isinstance(d, list) else d.get(k), keys, data)
-    except (KeyError, TypeError, IndexError, ValueError):
-        return default
+logger = logging.getLogger('cli-helper-92')
 
-def sanitize_payload(payload: Dict[str, Any], keys_to_scrub: List[str]) -> Dict[str, Any]:
-    """
-    Recursively purges sensitive keys from a dictionary.
-    """
-    if not isinstance(payload, dict):
-        return payload
+class EdgeCaseManager:
+    def __init__(self, fallback_value=None):
+        self.fallback = fallback_value
+
+    def sanitize_execution(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except (ValueError, TypeError, ZeroDivisionError) as e:
+                logger.warning(f"graceful recovery from {type(e).__name__}: {e}")
+                return self.fallback
+            except Exception as e:
+                logger.critical(f"unexpected system halt: {e}")
+                sys.exit(1)
+        return wrapper
+
+def resilient_execute(data, action_func):
+    """Attempts to run action on data, returning fallback on failure."""
+    handler = EdgeCaseManager(fallback_value="[ERROR_HANDLED]")
     
-    return {
-        k: ('***' if k in keys_to_scrub else sanitize_payload(v, keys_to_scrub))
-        for k, v in payload.items()
-    }
+    @handler.sanitize_execution
+    def process():
+        if not isinstance(data, (list, dict, str)):
+            raise TypeError("invalid data type input")
+        return action_func(data)
 
-def batch_process(items: List[Any], chunk_size: int = 10):
-    """
-    Yields successive chunks from a list.
-    """
-    for i in range(0, len(items), chunk_size):
-        yield items[i:i + chunk_size]
-
-def stringify_if_json(data: Any) -> str:
-    """
-    Attempts to serialize complex objects as json.
-    """
-    if isinstance(data, (dict, list)):
-        return json.dumps(data, sort_keys=True)
-    return str(data)
+    return process()
