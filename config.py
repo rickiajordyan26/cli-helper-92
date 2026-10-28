@@ -1,39 +1,50 @@
 import os
 import json
-import logging
 from pathlib import Path
+from typing import Any, Dict, Union
 
-class ConfigLoader:
-    def __init__(self, path: str = 'settings.json'):
-        self.path = Path(path)
-
-    def load(self):
-        try:
-            if not self.path.exists():
-                return {}
-            with open(self.path, 'r') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, PermissionError, OSError) as e:
-            logging.error(f'failed to load config: {e}')
-            return self._fallback_config(e)
-
-    def _fallback_config(self, exc):
-        # creative resilience: inject fault info into config structure
-        return {
-            'error_state': True,
-            'exception_type': type(exc).__name__,
-            'timestamp': os.times().elapsed,
-            'default_mode': 'safe'
+class DynamicEnvAccess:
+    """Reactive configuration registry auto-casting environment and file overrides."""
+    
+    def __init__(self, prefix: str = "CLI_"):
+        self._prefix = prefix
+        self._defaults: Dict[str, Any] = {
+            "debug": False,
+            "max_threads": 4,
+            "output_format": "json",
+            "cache_path": "~/.cache/cli-helper-92",
+            "timeout": 15.0,
         }
 
-def get_config_value(key: str, default=None):
-    loader = ConfigLoader()
-    config = loader.load()
-    if isinstance(config, dict):
-        return config.get(key, default)
-    return default
+    def __getattr__(self, name: str) -> Any:
+        env_key = f"{self._prefix}{name.upper()}"
+        if env_key in os.environ:
+            raw_val = os.environ[env_key]
+            default_type = type(self._defaults.get(name, ""))
+            return self._cast_value(raw_val, default_type)
+        if name in self._defaults:
+            return self._defaults[name]
+        raise AttributeError(f"Undefined configuration attribute: '{name}'")
 
-if __name__ == '__main__':
-    # ensure configuration robustness
-    data = get_config_value('theme', 'dark')
-    print(f'current theme: {data}')
+    def _cast_value(self, val: str, target_type: type) -> Any:
+        if target_type is bool:
+            return val.lower() in ("true", "1", "yes", "on")
+        if target_type in (int, float):
+            try:
+                return target_type(val)
+            except ValueError:
+                return val
+        return val
+
+    def sync_file(self, config_path: Union[str, Path]) -> None:
+        path = Path(config_path).expanduser()
+        if path.is_file():
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    self._defaults.update(data)
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {key: getattr(self, key) for key in self._defaults}
+
+config = DynamicEnvAccess()
