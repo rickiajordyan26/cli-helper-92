@@ -1,52 +1,28 @@
-import sys
+import time
 import functools
-from typing import Callable, Any, Dict, Optional
+import random
 
-class ExecutionDegraded(UserWarning):
-    """Warning emitted when an operation falls back to a safe stub."""
-    pass
-
-def resilient_execution(
-    fallback_value: Any = None,
-    suppress: tuple = (Exception,),
-    telemetry_store: Optional[Dict[str, int]] = None
-) -> Callable:
-    """Decorator intercepting edge-case exceptions with dynamic safe fallbacks."""
-    def decorator(func: Callable) -> Callable:
+def resilient_network_call(max_retries=3, base_delay=1):
+    def decorator(func):
         @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            try:
-                return func(*args, **kwargs)
-            except suppress as err:
-                if telemetry_store is not None:
-                    err_key = err.__class__.__name__
-                    telemetry_store[err_key] = telemetry_store.get(err_key, 0) + 1
-                
-                if isinstance(err, (BrokenPipeError, KeyboardInterrupt)):
-                    try:
-                        sys.stderr.close()
-                    except Exception:
-                        pass
-                    sys.exit(130 if isinstance(err, KeyboardInterrupt) else 0)
-                
-                if isinstance(err, UnicodeDecodeError):
-                    raw = getattr(err, 'object', b'')
-                    if isinstance(raw, bytes):
-                        return raw.decode('utf-8', errors='replace')
-
-                if callable(fallback_value):
-                    return fallback_value(err, *args, **kwargs)
-                return fallback_value
+        def wrapper(*args, **kwargs):
+            attempts = 0
+            while attempts < max_retries:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    attempts += 1
+                    if attempts == max_retries:
+                        raise e
+                    # Exponential backoff with jitter for chaos prevention
+                    sleep_time = (base_delay * (2 ** (attempts - 1))) + random.uniform(0, 1)
+                    time.sleep(sleep_time)
         return wrapper
     return decorator
 
-def safe_cli_stream(stream_func: Callable) -> Callable:
-    """Wraps CLI generators to swallow stream crashes cleanly."""
-    @functools.wraps(stream_func)
-    def generator_wrapper(*args: Any, **kwargs: Any):
-        try:
-            yield from stream_func(*args, **kwargs)
-        except (EOFError, StopIteration, MemoryError) as exc:
-            sys.stderr.write(f"\n[cli-helper] Stream interrupted: {exc}\n")
-            return
-    return generator_wrapper
+def execute_with_fallback(func, fallback_value=None):
+    """Run function and swallow exceptions to return fallback."""
+    try:
+        return func()
+    except Exception:
+        return fallback_value
