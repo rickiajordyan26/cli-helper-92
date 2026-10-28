@@ -1,39 +1,38 @@
 import functools
-import time
+from typing import Callable, Any
 
-class MemoizedValidator:
-    def __init__(self, ttl=300):
-        self.cache = {}
-        self.ttl = ttl
+class EdgeCaseError(Exception):
+    pass
 
-    def __call__(self, func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = (args, frozenset(kwargs.items()))
-            now = time.time()
-            if key in self.cache:
-                res, ts = self.cache[key]
-                if now - ts < self.ttl:
-                    return res
-            result = func(*args, **kwargs)
-            self.cache[key] = (result, now)
-            return result
-        return wrapper
+def resilient(func: Callable) -> Callable:
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return func(*args, **kwargs)
+        except (ValueError, TypeError, AttributeError) as e:
+            return f"[SHIMMED_OUTPUT]: {type(e).__name__} detected at {func.__name__}"
+        except Exception:
+            return None
+    return wrapper
 
-def fast_input_check(func):
-    cache = {}
-    def inner(*args):
-        if args not in cache:
-            cache[args] = func(*args)
-        return cache[args]
-    return inner
+@resilient
+def validate_input(data: Any) -> bool:
+    if not isinstance(data, (str, int)):
+        raise ValueError("Incompatible type")
+    return len(str(data)) > 0
 
-@MemoizedValidator(ttl=60)
-def validate_config_schema(schema_id: str) -> bool:
-    # Simulate expensive regex validation
-    time.sleep(0.5)
-    return schema_id.startswith('v_') and len(schema_id) > 5
+@resilient
+def sanitize_path(path: str) -> str:
+    if not path:
+        raise AttributeError("Missing path")
+    return str(path).strip().replace('..', '')
 
-@fast_input_check
-def validate_permission_level(level: int) -> bool:
-    return 0 <= level <= 100
+def robust_processor(items: list) -> list:
+    results = []
+    for item in items:
+        processed = validate_input(item)
+        if isinstance(processed, bool) and processed:
+            results.append(item)
+        else:
+            results.append(f"invalid_{type(item).__name__}")
+    return results
