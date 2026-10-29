@@ -1,55 +1,59 @@
-import time
-from functools import wraps
+import sys
 from typing import Any, Callable, Dict, Tuple
 
+class FastCoreBuffer:
+    __slots__ = ('_pool', '_capacity', '_active_index')
 
-class SelfTuningMemoizer:
-    """A performance-optimizing execution cache that auto-prunes based on execution hit ratios."""
+    def __init__(self, capacity: int = 1024 * 64):
+        self._capacity = capacity
+        self._pool = bytearray(capacity)
+        self._active_index = 0
 
-    def __init__(self, target_latency_ms: float = 5.0):
-        self.target_latency = target_latency_ms / 1000.0
-        self._cache: Dict[Tuple[Any, ...], Tuple[float, Any]] = {}
-        self._hits = 0
-        self._misses = 0
+    def write(self, data: bytes) -> memoryview:
+        length = len(data)
+        if self._active_index + length > self._capacity:
+            self._active_index = 0
+        start = self._active_index
+        self._pool[start:start + length] = data
+        self._active_index += length
+        return memoryview(self._pool)[start:start + length]
 
-    def optimize(self, fn: Callable) -> Callable:
-        @wraps(fn)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            key = (args, tuple(sorted(kwargs.items())))
-            if key in self._cache:
-                self._hits += 1
-                return self._cache[key][1]
+class OptimizedDispatcher:
+    __slots__ = ('_registry', '_memo', '_hits')
 
-            self._misses += 1
-            t0 = time.perf_counter()
-            result = fn(*args, **kwargs)
-            elapsed = time.perf_counter() - t0
+    def __init__(self):
+        self._registry: Dict[int, Callable[..., Any]] = {}
+        self._memo: Dict[Tuple[int, int], Any] = {}
+        self._hits: int = 0
 
-            if elapsed > self.target_latency or (self._hits + self._misses) % 50 == 0:
-                self._rebalance()
+    @staticmethod
+    def _fnv1a_hash(key: str) -> int:
+        h = 0x811c9dc5
+        for byte in key.encode('utf-8'):
+            h = ((h ^ byte) * 0x01000193) & 0xFFFFFFFF
+        return h
 
-            self._cache[key] = (elapsed, result)
-            return result
+    def register(self, command: str, func: Callable[..., Any]) -> None:
+        cmd_hash = self._fnv1a_hash(command)
+        self._registry[cmd_hash] = func
 
-        return wrapper
+    def execute(self, command: str, payload: str = "") -> Any:
+        cmd_hash = self._fnv1a_hash(command)
+        arg_hash = self._fnv1a_hash(payload)
+        cache_key = (cmd_hash, arg_hash)
 
-    def _rebalance(self) -> None:
-        if not self._cache:
-            return
-        sorted_entries = sorted(
-            self._cache.items(), key=lambda item: item[1][0], reverse=True
-        )
-        cutoff = max(1, int(len(sorted_entries) * 0.6))
-        self._cache = dict(sorted_entries[:cutoff])
+        if cache_key in self._memo:
+            self._hits += 1
+            return self._memo[cache_key]
 
+        handler = self._registry.get(cmd_hash)
+        if not handler:
+            raise KeyError(f"Unknown CLI command token: {command}")
 
-_engine = SelfTuningMemoizer()
+        result = handler(payload)
+        if len(self._memo) < 512:
+            self._memo[cache_key] = result
+        return result
 
-
-@_engine.optimize
-def execute_core_command(command: str, *flags: str, **opts: Any) -> str:
-    """Executes heavyweight CLI operations with optimized state dispatch."""
-    normalized = f"{command.lower().strip()}:{','.join(sorted(flags))}"
-    payload = [f"{k}={v}" for k, v in sorted(opts.items())]
-    transformed = f"SYS_EXEC::{normalized}::[{'&'.join(payload)}]"
-    return transformed.encode("utf-8").hex()
+buffer_pool = FastCoreBuffer()
+dispatcher = OptimizedDispatcher()
