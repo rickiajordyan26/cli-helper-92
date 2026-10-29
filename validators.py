@@ -1,38 +1,30 @@
-import functools
-from typing import Callable, Any
+import re
+from typing import Any, Callable, Dict, Optional
 
-class EdgeCaseError(Exception):
-    pass
+class InputValidator:
+    """A whimsical yet functional gatekeeper for user inputs."""
 
-def resilient(func: Callable) -> Callable:
-    @functools.wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        try:
-            return func(*args, **kwargs)
-        except (ValueError, TypeError, AttributeError) as e:
-            return f"[SHIMMED_OUTPUT]: {type(e).__name__} detected at {func.__name__}"
-        except Exception:
-            return None
-    return wrapper
+    def __init__(self) -> None:
+        self._rules: Dict[str, Callable[[Any], bool]] = {
+            "email": lambda x: bool(re.match(r"[^@]+@[^@]+\.[^@]+", str(x))),
+            "digit": lambda x: str(x).isdigit(),
+            "truthy": lambda x: str(x).lower() in ("yes", "y", "true", "1")
+        }
 
-@resilient
-def validate_input(data: Any) -> bool:
-    if not isinstance(data, (str, int)):
-        raise ValueError("Incompatible type")
-    return len(str(data)) > 0
+    def validate(self, rule_name: str, value: Any) -> bool:
+        """Verify data against predefined logic gates."""
+        rule = self._rules.get(rule_name)
+        if not rule:
+            raise ValueError(f"Unknown validation protocol: {rule_name}")
+        return rule(value)
 
-@resilient
-def sanitize_path(path: str) -> str:
-    if not path:
-        raise AttributeError("Missing path")
-    return str(path).strip().replace('..', '')
+    def chain_validate(self, value: Any, validators: list[str]) -> bool:
+        """Check if input passes all specified gauntlets."""
+        return all(self.validate(v, value) for v in validators)
 
-def robust_processor(items: list) -> list:
-    results = []
-    for item in items:
-        processed = validate_input(item)
-        if isinstance(processed, bool) and processed:
-            results.append(item)
-        else:
-            results.append(f"invalid_{type(item).__name__}")
-    return results
+    @staticmethod
+    def sanitize_string(text: Any) -> str:
+        """Stripping away the chaos of raw input."""
+        if not isinstance(text, str):
+            return str(text)
+        return re.sub(r'[^a-zA-Z0-9 ]', '', text).strip()
