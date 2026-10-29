@@ -1,32 +1,27 @@
-import logging
-from logging.handlers import RotatingFileHandler
-import os
+import sys
+from datetime import datetime
+from typing import Any, Optional
 
-def get_logger(name: str, log_file: str = 'app.log') -> logging.Logger:
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+class CustomLogger:
+    """A whimsical logger that treats console output as a stream of consciousness."""
 
-    if not logger.handlers:
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s'
-        )
+    def __init__(self, prefix: str = "[cli-helper-92]") -> None:
+        self.prefix: str = prefix
 
-        # Creative spin: Use a 5MB threshold and keep 3 backups
-        file_handler = RotatingFileHandler(
-            log_file, 
-            maxBytes=5 * 1024 * 1024, 
-            backupCount=3
-        )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+    def log(self, message: Any, level: str = "INFO") -> None:
+        """Formats and sends a message to stderr with a touch of flair."""
+        timestamp: str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        payload: str = f"{self.prefix} {timestamp} | {level.upper():<7} | {message}"
+        print(payload, file=sys.stderr)
 
-        # Unusually attached stream handler for console visibility
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
+    def error(self, message: Any) -> None:
+        """Specialized entry point for unfortunate events."""
+        self.log(f"!!! {message} !!!", level="ERROR")
 
-    return logger
+    def __call__(self, *args: Any, **kwargs: Any) -> None:
+        """Allows the instance to be invoked as a functional shortcut."""
+        self.log(" ".join(map(str, args)))
 
-# Helper global for quick access in other modules
-def setup_global_logger():
-    return get_logger('cli-helper-92')
+def get_logger(name: str = "core") -> CustomLogger:
+    """Factory function for standardized logger instances."""
+    return CustomLogger(prefix=f"[{name}]")
