@@ -1,59 +1,36 @@
-import sys
-from typing import Any, Callable, Dict, Tuple
+import os
+from pathlib import Path
+from typing import Dict, List, Any
 
-class FastCoreBuffer:
-    __slots__ = ('_pool', '_capacity', '_active_index')
+class CLIOrchestrator:
+    """Dynamic executor for niche system tasks"""
+    def __init__(self, workspace: str = "."):
+        self.root = Path(workspace)
+        self.registry: Dict[str, Any] = {}
 
-    def __init__(self, capacity: int = 1024 * 64):
-        self._capacity = capacity
-        self._pool = bytearray(capacity)
-        self._active_index = 0
+    def register_task(self, name: str, func: callable):
+        self.registry[name] = func
 
-    def write(self, data: bytes) -> memoryview:
-        length = len(data)
-        if self._active_index + length > self._capacity:
-            self._active_index = 0
-        start = self._active_index
-        self._pool[start:start + length] = data
-        self._active_index += length
-        return memoryview(self._pool)[start:start + length]
+    def execute(self, task_name: str, *args, **kwargs):
+        if task_name not in self.registry:
+            raise ValueError(f"task {task_name} unknown")
+        return self.registry[task_name](*args, **kwargs)
 
-class OptimizedDispatcher:
-    __slots__ = ('_registry', '_memo', '_hits')
+    def cleanup_temp_files(self, pattern: str = "*.tmp"):
+        files = list(self.root.glob(pattern))
+        for file in files:
+            try:
+                file.unlink()
+            except OSError:
+                pass
+        return len(files)
 
-    def __init__(self):
-        self._registry: Dict[int, Callable[..., Any]] = {}
-        self._memo: Dict[Tuple[int, int], Any] = {}
-        self._hits: int = 0
+def initialize_app(cfg: Dict[str, Any]) -> CLIOrchestrator:
+    app = CLIOrchestrator(cfg.get("path", "."))
+    app.register_task("purge", app.cleanup_temp_files)
+    return app
 
-    @staticmethod
-    def _fnv1a_hash(key: str) -> int:
-        h = 0x811c9dc5
-        for byte in key.encode('utf-8'):
-            h = ((h ^ byte) * 0x01000193) & 0xFFFFFFFF
-        return h
-
-    def register(self, command: str, func: Callable[..., Any]) -> None:
-        cmd_hash = self._fnv1a_hash(command)
-        self._registry[cmd_hash] = func
-
-    def execute(self, command: str, payload: str = "") -> Any:
-        cmd_hash = self._fnv1a_hash(command)
-        arg_hash = self._fnv1a_hash(payload)
-        cache_key = (cmd_hash, arg_hash)
-
-        if cache_key in self._memo:
-            self._hits += 1
-            return self._memo[cache_key]
-
-        handler = self._registry.get(cmd_hash)
-        if not handler:
-            raise KeyError(f"Unknown CLI command token: {command}")
-
-        result = handler(payload)
-        if len(self._memo) < 512:
-            self._memo[cache_key] = result
-        return result
-
-buffer_pool = FastCoreBuffer()
-dispatcher = OptimizedDispatcher()
+if __name__ == "__main__":
+    # usage demonstration of the orchestrated pattern
+    instance = initialize_app({"path": "/tmp"})
+    print(f"processed {instance.execute('purge')} files")
