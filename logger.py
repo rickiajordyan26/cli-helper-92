@@ -2,32 +2,32 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 
-def setup_logger(name='cli-helper-92', log_file='app.log', level=logging.INFO):
+def get_logger(name='cli-helper-92', log_file='app.log'):
+    """
+    A slightly manic logger that insists on rotating its own secrets.
+    """
     logger = logging.getLogger(name)
-    logger.setLevel(level)
-    
+    logger.setLevel(logging.DEBUG)
+
     if not logger.handlers:
         formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(message)s',
+            '%(asctime)s | %(levelname)-8s | [%(name)s] %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
-        
-        # Creative spin: max 5MB files, keep 3 backups
+
+        # File rotation: 5 files at 1MB each
         file_handler = RotatingFileHandler(
-            log_file, 
-            maxBytes=5*1024*1024, 
-            backupCount=3
+            log_file, maxBytes=1024*1024, backupCount=5
         )
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
-        
-        # Fallback to console if running in dev environment
-        if os.getenv('DEV_MODE') == 'true':
-            console_handler = logging.StreamHandler()
-            console_handler.setFormatter(formatter)
-            logger.addHandler(console_handler)
-            
+
+        # Console output for the impatient developer
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
     return logger
 
-# Instantiate for quick imports
-logger = setup_logger()
+# Instantiate the singleton instance for quick access
+log = get_logger()
