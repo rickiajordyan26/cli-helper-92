@@ -1,77 +1,62 @@
-"""Validator engine providing composable validation rules for CLI inputs."""
-
-from typing import Callable, Any, TypeVar, Generic, Sequence
 import re
-
-T = TypeVar("T")
-
-
-class Rule(Generic[T]):
-    """A composable validation rule wrapping a predicate function.
-    
-    Allows combining validation rules using bitwise operators (&, |, ~)
-    to build expressively chained validation logic.
-    """
-    def __init__(self, predicate: Callable[[T], bool], message: str) -> None:
-        self.predicate = predicate
-        self.message = message
-
-    def __call__(self, value: T) -> tuple[bool, str]:
-        """Execute validation against the given value, returning pass status and error message."""
-        is_valid = bool(self.predicate(value))
-        return is_valid, "" if is_valid else self.message
-
-    def __and__(self, other: "Rule[T]") -> "Rule[T]":
-        """Combine two rules with logical AND."""
-        return Rule(
-            lambda val: self(val)[0] and other(val)[0],
-            f"{self.message} AND {other.message}"
-        )
-
-    def __or__(self, other: "Rule[T]") -> "Rule[T]":
-        """Combine two rules with logical OR."""
-        return Rule(
-            lambda val: self(val)[0] or other(val)[0],
-            f"{self.message} OR {other.message}"
-        )
-
-    def __invert__(self) -> "Rule[T]":
-        """Negate the validation rule logic."""
-        return Rule(
-            lambda val: not self(val)[0],
-            f"NOT ({self.message})"
-        )
+from typing import Any, Callable, List, Tuple
 
 
-def is_non_empty() -> Rule[str]:
-    """Validates that string input is non-empty after stripping whitespace."""
-    return Rule(lambda s: bool(s and s.strip()), "Value cannot be empty")
+class ValidationResult:
+    def __init__(self, is_valid: bool, error: str = ""):
+        self.is_valid = is_valid
+        self.error = error
+
+    def __bool__(self) -> bool:
+        return self.is_valid
+
+    def __repr__(self) -> str:
+        return "Valid" if self.is_valid else f"Invalid({self.error})"
 
 
-def is_numeric() -> Rule[str]:
-    """Validates that string input represents a valid integer or float."""
-    return Rule(
-        lambda s: bool(re.match(r"^-?\d+(\.\d+)?$", s.strip())),
-        "Value must be numeric"
-    )
+class Rule:
+    def __init__(self, check_fn: Callable[[Any], bool], error_message: str):
+        self.check_fn = check_fn
+        self.error_message = error_message
+
+    def __call__(self, value: Any) -> ValidationResult:
+        try:
+            if self.check_fn(value):
+                return ValidationResult(True)
+            return ValidationResult(False, self.error_message)
+        except Exception as e:
+            return ValidationResult(False, f"Evaluation error: {e}")
+
+    def __or__(self, other: "Rule") -> "Rule":
+        def composed_check(val: Any) -> bool:
+            return bool(self(val) or other(val))
+        return Rule(composed_check, f"({self.error_message} OR {other.error_message})")
+
+    def __and__(self, other: "Rule") -> "Rule":
+        def composed_check(val: Any) -> bool:
+            return bool(self(val) and other(val))
+        return Rule(composed_check, f"({self.error_message} AND {other.error_message})")
 
 
-def matches_regex(pattern: str) -> Rule[str]:
-    """Validates that string input matches a specific regular expression pattern."""
-    compiled = re.compile(pattern)
-    return Rule(lambda s: bool(compiled.search(s)), f"Value must match pattern: {pattern}")
+IS_NOT_EMPTY = Rule(
+    lambda v: bool(v and str(v).strip()), "value cannot be empty"
+)
+IS_ALPHANUMERIC = Rule(
+    lambda v: str(v).isalnum(), "value must be alphanumeric"
+)
+IS_PATH_SAFE = Rule(
+    lambda v: not re.search(r'[<>:"|?*]', str(v)),
+    "value contains illegal path characters",
+)
+
+CLI_IDENTIFIER = IS_NOT_EMPTY & IS_ALPHANUMERIC
+CLI_PATH = IS_NOT_EMPTY & IS_PATH_SAFE
 
 
-def in_choices(choices: Sequence[Any]) -> Rule[Any]:
-    """Validates that input exists within a defined sequence of choices."""
-    return Rule(lambda val: val in choices, f"Value must be one of {list(choices)}")
-
-
-def validate_all(value: Any, rules: Sequence[Rule[Any]]) -> list[str]:
-    """Runs multiple validation rules against a single value, returning collected errors."""
-    errors: list[str] = []
+def validate_cli_arg(arg: Any, *rules: Rule) -> Tuple[bool, List[str]]:
+    errors = []
     for rule in rules:
-        ok, msg = rule(value)
-        if not ok:
-            errors.append(msg)
-    return errors
+        res = rule(arg)
+        if not res:
+            errors.append(res.error)
+    return len(errors) == 0, errors
