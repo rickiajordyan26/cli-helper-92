@@ -1,50 +1,31 @@
-import os
 import json
-from pathlib import Path
-from typing import Any, Dict, Union
+import os
+from typing import Any, Dict
 
-class DynamicEnvAccess:
-    """Reactive configuration registry auto-casting environment and file overrides."""
-    
-    def __init__(self, prefix: str = "CLI_"):
-        self._prefix = prefix
-        self._defaults: Dict[str, Any] = {
-            "debug": False,
-            "max_threads": 4,
-            "output_format": "json",
-            "cache_path": "~/.cache/cli-helper-92",
-            "timeout": 15.0,
-        }
+class ConfigLoader:
+    """A magical config loader that merges defaults with disk overrides."""
+    def __init__(self, defaults: Dict[str, Any], path: str = 'config.json'):
+        self.defaults = defaults
+        self.path = path
 
-    def __getattr__(self, name: str) -> Any:
-        env_key = f"{self._prefix}{name.upper()}"
-        if env_key in os.environ:
-            raw_val = os.environ[env_key]
-            default_type = type(self._defaults.get(name, ""))
-            return self._cast_value(raw_val, default_type)
-        if name in self._defaults:
-            return self._defaults[name]
-        raise AttributeError(f"Undefined configuration attribute: '{name}'")
-
-    def _cast_value(self, val: str, target_type: type) -> Any:
-        if target_type is bool:
-            return val.lower() in ("true", "1", "yes", "on")
-        if target_type in (int, float):
+    def load(self) -> Dict[str, Any]:
+        data = self.defaults.copy()
+        if os.path.exists(self.path):
             try:
-                return target_type(val)
-            except ValueError:
-                return val
-        return val
+                with open(self.path, 'r') as f:
+                    disk_data = json.load(f)
+                    data.update(disk_data)
+            except (json.JSONDecodeError, IOError):
+                pass
+        return data
 
-    def sync_file(self, config_path: Union[str, Path]) -> None:
-        path = Path(config_path).expanduser()
-        if path.is_file():
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    self._defaults.update(data)
+    @classmethod
+    def create_if_missing(cls, defaults: Dict[str, Any], path: str = 'config.json') -> Dict[str, Any]:
+        if not os.path.exists(path):
+            with open(path, 'w') as f:
+                json.dump(defaults, f, indent=4)
+            return defaults
+        return cls(defaults, path).load()
 
-    def as_dict(self) -> Dict[str, Any]:
-        return {key: getattr(self, key) for key in self._defaults}
-
-config = DynamicEnvAccess()
+def get_app_config(config_defaults: Dict[str, Any]) -> Dict[str, Any]:
+    return ConfigLoader.create_if_missing(config_defaults)
