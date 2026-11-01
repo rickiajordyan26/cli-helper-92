@@ -1,48 +1,34 @@
-import os
-import json
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, List, Union
+import functools
 
-class DataSanitizer:
-    def __init__(self, depth: int = 3):
-        self.depth = depth
+def compose_filters(*funcs: Callable[[Any], Any]) -> Callable[[Any], Any]:
+    """Chain multiple transformation functions together using functional composition."""
+    def pipeline(data: Any) -> Any:
+        return functools.reduce(lambda v, f: f(v), funcs, data)
+    return pipeline
 
-    def recursive_strip(self, data: Any) -> Any:
-        if self.depth <= 0: return data
-        if isinstance(data, dict):
-            return {str(k).strip(): self.recursive_strip(v) for k, v in data.items()}
-        if isinstance(data, list):
-            return [self.recursive_strip(i) for i in data]
-        return data.strip() if isinstance(data, str) else data
+def batch_process(items: List[Any], chunk_size: int = 10) -> List[List[Any]]:
+    """Split a flat list into chunks for bulk operations."""
+    if chunk_size <= 0:
+        return [items]
+    return [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
 
-def load_session(path: str) -> Dict[str, Any]:
-    if not os.path.exists(path):
-        return {}
-    with open(path, 'r') as f:
-        try:
-            return json.load(f)
-        except json.JSONDecodeError:
-            return {}
+def deep_update(source: Dict[Any, Any], overrides: Dict[Any, Any]) -> Dict[Any, Any]:
+    """Recursively merge dictionaries with priority to the override dictionary."""
+    for key, value in overrides.items():
+        if isinstance(value, dict) and value:
+            source[key] = deep_update(source.get(key, {}), value)
+        else:
+            source[key] = value
+    return source
 
-def save_session(path: str, data: Dict[str, Any]) -> bool:
-    try:
-        with open(path, 'w') as f:
-            json.dump(data, f, indent=4)
-        return True
-    except IOError:
-        return False
-
-def generate_context_id(seed: str) -> str:
-    import hashlib
-    return hashlib.md5(seed.encode()).hexdigest()[:8]
-
-class SessionManager:
-    def __init__(self, file_path: str = '.session.json'):
-        self.file_path = file_path
-        self.state = load_session(file_path)
-
-    def update(self, key: str, value: Any):
-        self.state[key] = value
-        save_session(self.file_path, self.state)
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return self.state.get(key, default)
+def memoize_with_expiry(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Decorator that caches results with a bit of unconventional state management."""
+    cache: Dict[str, Any] = {}
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        key = str(args) + str(kwargs)
+        if key not in cache:
+            cache[key] = func(*args, **kwargs)
+        return cache[key]
+    return wrapper
