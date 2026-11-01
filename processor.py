@@ -1,50 +1,63 @@
-import time
-import math
-import random
-from typing import Callable, Any, Type, Tuple, Optional
+import re
+from typing import Any, Callable, Union
 
-class NetworkOpError(Exception):
-    """Raised when all retry attempts for a network operation fail."""
-    pass
 
-def retry_network_op(
-    max_attempts: int = 4,
-    base_delay: float = 0.5,
-    exceptions: Tuple[Type[BaseException], ...] = (Exception,)
-) -> Callable:
-    """Decorator applying golden-ratio backoff retry logic to network calls."""
-    phi = (1 + math.sqrt(5)) / 2
+class DataWeaver:
+    """A creative fluid wrapper for querying and morphing nested collections."""
 
-    def decorator(func: Callable) -> Callable:
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            last_err: Optional[BaseException] = None
-            attempt_sequence = (base_delay * (phi ** k) for k in range(max_attempts))
-            
-            for attempt, delay in enumerate(attempt_sequence, start=1):
-                try:
-                    return func(*args, **kwargs)
-                except exceptions as err:
-                    last_err = err
-                    if attempt == max_attempts:
-                        break
-                    jitter = (hash(func.__name__ + str(attempt)) % 100) / 1000.0
-                    total_sleep = delay + jitter
-                    time.sleep(total_sleep)
-            
-            raise NetworkOpError(
-                f"Operation '{func.__name__}' failed after {max_attempts} attempts. Last error: {last_err}"
-            ) from last_err
+    def __init__(self, payload: Any):
+        self.data = payload
 
-        return wrapper
+    def __or__(self, transform: Callable[[Any], Any]) -> "DataWeaver":
+        """Use bitwise OR as a pipeline operator."""
+        if callable(transform):
+            return DataWeaver(transform(self.data))
+        return self
 
-    return decorator
+    def pluck(self, *path: Union[str, int]) -> "DataWeaver":
+        """Deeply extract nested elements using path segments or regex patterns."""
+        curr = self.data
+        for key in path:
+            if isinstance(curr, dict) and isinstance(key, str):
+                if key in curr:
+                    curr = curr[key]
+                else:
+                    matched = [v for k, v in curr.items() if re.search(str(key), str(k))]
+                    curr = matched if matched else None
+            elif isinstance(curr, (list, tuple)) and isinstance(key, int):
+                curr = curr[key] if 0 <= key < len(curr) else None
+            else:
+                curr = None
+            if curr is None:
+                break
+        return DataWeaver(curr)
 
-class NetworkProcessor:
-    def __init__(self, timeout: float = 5.0):
-        self.timeout = timeout
+    def flatten(self) -> "DataWeaver":
+        """Flatten arbitrarily nested dictionaries and lists into key-value tuples."""
+        def _unravel(obj, prefix=""):
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    new_key = f"{prefix}.{k}" if prefix else str(k)
+                    yield from _unravel(v, new_key)
+            elif isinstance(obj, (list, tuple)):
+                for idx, v in enumerate(obj):
+                    yield from _unravel(v, f"{prefix}[{idx}]")
+            else:
+                yield (prefix, obj)
 
-    @retry_network_op(max_attempts=3, base_delay=0.2, exceptions=(ConnectionError, TimeoutError))
-    def fetch_payload(self, url_sim: str, fail_rate: float = 0.5) -> dict:
-        if random.random() < fail_rate:
-            raise ConnectionError(f"Simulated transport failure reaching {url_sim}")
-        return {"status": 200, "data": f"payload from {url_sim}"}
+        return DataWeaver(dict(_unravel(self.data)))
+
+    def unwrap(self) -> Any:
+        """Extract the underlying processed payload."""
+        return self.data
+
+
+def process_nested_data(data: Any, path: str = "", flatten: bool = False) -> Any:
+    """Helper utility for fluid extraction and flattening of generic data."""
+    weaver = DataWeaver(data)
+    if path:
+        segments = [int(s) if s.isdigit() else s for s in path.split(".")]
+        weaver = weaver.pluck(*segments)
+    if flatten:
+        weaver = weaver.flatten()
+    return weaver.unwrap()
