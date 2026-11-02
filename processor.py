@@ -1,63 +1,62 @@
+import json
 import re
-from typing import Any, Callable, Union
+from typing import Any, Callable, List, Union
 
+class StreamPipe:
+    """Fluent operator-overloaded pipeline wrapper for CLI stream processing."""
+    def __init__(self, data: Any = None):
+        self._data = data
 
-class DataWeaver:
-    """A creative fluid wrapper for querying and morphing nested collections."""
+    def __ror__(self, left: Any) -> 'StreamPipe':
+        return StreamPipe(left)
 
-    def __init__(self, payload: Any):
-        self.data = payload
-
-    def __or__(self, transform: Callable[[Any], Any]) -> "DataWeaver":
-        """Use bitwise OR as a pipeline operator."""
-        if callable(transform):
-            return DataWeaver(transform(self.data))
+    def __or__(self, func: Callable[[Any], Any]) -> 'StreamPipe':
+        if callable(func):
+            if isinstance(self._data, (list, tuple)):
+                return StreamPipe([func(item) for item in self._data])
+            return StreamPipe(func(self._data))
         return self
 
-    def pluck(self, *path: Union[str, int]) -> "DataWeaver":
-        """Deeply extract nested elements using path segments or regex patterns."""
-        curr = self.data
-        for key in path:
-            if isinstance(curr, dict) and isinstance(key, str):
-                if key in curr:
-                    curr = curr[key]
-                else:
-                    matched = [v for k, v in curr.items() if re.search(str(key), str(k))]
-                    curr = matched if matched else None
-            elif isinstance(curr, (list, tuple)) and isinstance(key, int):
-                curr = curr[key] if 0 <= key < len(curr) else None
-            else:
-                curr = None
-            if curr is None:
-                break
-        return DataWeaver(curr)
-
-    def flatten(self) -> "DataWeaver":
-        """Flatten arbitrarily nested dictionaries and lists into key-value tuples."""
-        def _unravel(obj, prefix=""):
-            if isinstance(obj, dict):
-                for k, v in obj.items():
-                    new_key = f"{prefix}.{k}" if prefix else str(k)
-                    yield from _unravel(v, new_key)
-            elif isinstance(obj, (list, tuple)):
-                for idx, v in enumerate(obj):
-                    yield from _unravel(v, f"{prefix}[{idx}]")
-            else:
-                yield (prefix, obj)
-
-        return DataWeaver(dict(_unravel(self.data)))
-
     def unwrap(self) -> Any:
-        """Extract the underlying processed payload."""
-        return self.data
+        return self._data
+
+    def __str__(self) -> str:
+        return str(self._data)
 
 
-def process_nested_data(data: Any, path: str = "", flatten: bool = False) -> Any:
-    """Helper utility for fluid extraction and flattening of generic data."""
-    weaver = DataWeaver(data)
-    if path:
-        segments = [int(s) if s.isdigit() else s for s in path.split(".")]
-        weaver = weaver.pluck(*segments)
-    if flatten:
-        weaver = weaver.flatten()
-    return weaver.unwrap()
+def strip_ansi(text: str) -> str:
+    """Removes ANSI color and formatting escape codes from string data."""
+    ansi_regex = re.compile(r'\x1B(?:[@-Z\\-_]|\\[[0-?]*[ -/]*[@-~])')
+    return ansi_regex.sub('', str(text))
+
+
+def truncate(length: int = 40, tail: str = "...") -> Callable[[Any], str]:
+    """Creates a function that truncates strings to specified length."""
+    def _truncator(val: Any) -> str:
+        text = str(val)
+        return text[:max(0, length - len(tail))] + tail if len(text) > length else text
+    return _truncator
+
+
+def ascii_box(header: str = "") -> Callable[[Any], str]:
+    """Creates a function that wraps text inside a formatted ASCII frame."""
+    def _boxer(val: Any) -> str:
+        lines = str(val).splitlines() or [""]
+        width = max(max(len(line) for line in lines), len(header)) + 2
+        top = f"+--{header:-^{width-2}}--+" if header else f"+{'-' * (width + 2)}+"
+        bottom = f"+{'-' * (width + 2)}+"
+        body = [f"| {line:<{width}} |" for line in lines]
+        return "\n".join([top] + body + [bottom])
+    return _boxer
+
+
+def auto_serialize(indent: int = 2) -> Callable[[Any], str]:
+    """Creates a transformer for auto-formatting dicts or JSON strings."""
+    def _serializer(val: Any) -> str:
+        if isinstance(val, str):
+            try:
+                val = json.loads(val)
+            except json.JSONDecodeError:
+                return val
+        return json.dumps(val, indent=indent, default=str)
+    return _serializer
