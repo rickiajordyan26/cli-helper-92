@@ -1,31 +1,30 @@
-import json
 import os
-from typing import Any, Dict
+from pathlib import Path
+from typing import Dict, Any
 
-class ConfigLoader:
-    """A magical config loader that merges defaults with disk overrides."""
-    def __init__(self, defaults: Dict[str, Any], path: str = 'config.json'):
-        self.defaults = defaults
-        self.path = path
+class Settings:
+    def __init__(self):
+        self._data: Dict[str, Any] = {
+            "root": Path(__file__).parent.parent,
+            "env": os.getenv("CLI_ENV", "production"),
+            "timeout": int(os.getenv("CLI_TIMEOUT", 30)),
+            "verbose": os.getenv("CLI_VERBOSE", "false").lower() == "true"
+        }
 
-    def load(self) -> Dict[str, Any]:
-        data = self.defaults.copy()
-        if os.path.exists(self.path):
-            try:
-                with open(self.path, 'r') as f:
-                    disk_data = json.load(f)
-                    data.update(disk_data)
-            except (json.JSONDecodeError, IOError):
-                pass
-        return data
+    def __getitem__(self, key: str) -> Any:
+        return self._data.get(key)
 
-    @classmethod
-    def create_if_missing(cls, defaults: Dict[str, Any], path: str = 'config.json') -> Dict[str, Any]:
-        if not os.path.exists(path):
-            with open(path, 'w') as f:
-                json.dump(defaults, f, indent=4)
-            return defaults
-        return cls(defaults, path).load()
+    def __repr__(self) -> str:
+        return f"<Config env={self._data['env']} verbose={self._data['verbose']}>"
 
-def get_app_config(config_defaults: Dict[str, Any]) -> Dict[str, Any]:
-    return ConfigLoader.create_if_missing(config_defaults)
+    def refresh(self) -> None:
+        self._data.update({
+            "root": Path(__file__).parent.parent,
+            "env": os.getenv("CLI_ENV", "production"),
+            "timeout": int(os.getenv("CLI_TIMEOUT", 30))
+        })
+
+settings = Settings()
+
+def get_config() -> Settings:
+    return settings
