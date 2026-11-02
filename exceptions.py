@@ -2,36 +2,32 @@ import functools
 import time
 import logging
 
-class PerformanceOptimizer:
-    def __init__(self):
+logger = logging.getLogger('cli-helper-92')
+
+class PerformanceLimitExceeded(Exception):
+    """Raised when core operations exceed latency thresholds."""
+
+class memoize_with_ttl:
+    def __init__(self, ttl_seconds=60):
         self.cache = {}
+        self.ttl = ttl_seconds
 
-    def memoize_with_ttl(self, ttl=60):
-        def decorator(func):
-            @functools.wraps(func)
-            def wrapper(*args, **kwargs):
-                key = (func.__name__, args, frozenset(kwargs.items()))
-                now = time.time()
-                if key in self.cache:
-                    val, timestamp = self.cache[key]
-                    if now - timestamp < ttl:
-                        return val
-                result = func(*args, **kwargs)
-                self.cache[key] = (result, now)
-                return result
-            return wrapper
-        return decorator
+    def __call__(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            key = (args, tuple(sorted(kwargs.items())))
+            now = time.time()
+            if key in self.cache:
+                result, timestamp = self.cache[key]
+                if now - timestamp < self.ttl:
+                    return result
+            result = func(*args, **kwargs)
+            self.cache[key] = (result, now)
+            return result
+        return wrapper
 
-class CoreOptimizationError(Exception):
-    """Base exception for optimization layer failures."""
-
-class CacheOverflowError(CoreOptimizationError):
-    """Raised when the internal memory pool exceeds limit."""
-
-class ExecutionTimeoutError(CoreOptimizationError):
-    """Raised when optimization process takes too long."""
-
-optimizer = PerformanceOptimizer()
-
-def optimize_routine(func):
-    return optimizer.memoize_with_ttl(ttl=30)(func)
+@memoize_with_ttl(ttl_seconds=30)
+def fast_path_execution(operation_id: int) -> dict:
+    """Simulated heavy compute path with TTL caching."""
+    logger.debug(f"Computing expensive task: {operation_id}")
+    return {"id": operation_id, "status": "optimized", "ts": time.time()}
