@@ -1,33 +1,69 @@
-import functools
-import time
-import logging
+"""Structured exception handling module with CLI context dynamic wrapping."""
 
-logger = logging.getLogger('cli-helper-92')
+import sys
+from typing import Any, Dict, Optional, Type, TypeVar
 
-class PerformanceLimitExceeded(Exception):
-    """Raised when core operations exceed latency thresholds."""
+E = TypeVar("E", bound="CLIHelperError")
 
-class memoize_with_ttl:
-    def __init__(self, ttl_seconds=60):
-        self.cache = {}
-        self.ttl = ttl_seconds
 
-    def __call__(self, func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = (args, tuple(sorted(kwargs.items())))
-            now = time.time()
-            if key in self.cache:
-                result, timestamp = self.cache[key]
-                if now - timestamp < self.ttl:
-                    return result
-            result = func(*args, **kwargs)
-            self.cache[key] = (result, now)
-            return result
-        return wrapper
+class CLIHelperError(Exception):
+    """Base exception class for cli-helper-92 with rich metadata and code mapping."""
 
-@memoize_with_ttl(ttl_seconds=30)
-def fast_path_execution(operation_id: int) -> dict:
-    """Simulated heavy compute path with TTL caching."""
-    logger.debug(f"Computing expensive task: {operation_id}")
-    return {"id": operation_id, "status": "optimized", "ts": time.time()}
+    default_exit_code: int = 1
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        exit_code: Optional[int] = None,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(message)
+        self.message: str = message
+        self.exit_code: int = exit_code if exit_code is not None else self.default_exit_code
+        self.context: Dict[str, Any] = context or {}
+
+    def format_cli_output(self, verbose: bool = False) -> str:
+        """Format the exception message for command line output.
+
+        Args:
+            verbose: Include execution context dictionary if True.
+
+        Returns:
+            A human-readable formatted error string.
+        """
+        base: str = f"[Error {self.exit_code}] {self.message}"
+        if verbose and self.context:
+            details = ", ".join(f"{k}={v!r}" for k, v in self.context.items())
+            return f"{base} | Context: {{{details}}}"
+        return base
+
+    @classmethod
+    def raise_with_context(
+        cls: Type[E], message: str, **kwargs: Any
+    ) -> None:
+        """Instantiate and raise an error with arbitrary context keyword args."""
+        raise cls(message, context=kwargs)
+
+
+class ConfigurationError(CLIHelperError):
+    """Raised when application configuration is missing or invalid."""
+
+    default_exit_code: int = 78
+
+
+class CommandExecutionError(CLIHelperError):
+    """Raised when a sub-command fails or exits with an unexpected code."""
+
+    default_exit_code: int = 127
+
+
+def handle_cli_exception(err: CLIHelperError, verbose: bool = False) -> None:
+    """Standardized terminal error output routine and exit dispatcher.
+
+    Args:
+        err: The caught CLIHelperError instance.
+        verbose: Output detailed contextual information if True.
+    """
+    sys.stderr.write(f"{err.format_cli_output(verbose=verbose)}\n")
+    sys.exit(err.exit_code)
