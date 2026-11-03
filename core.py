@@ -1,36 +1,32 @@
 import os
+import shutil
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import List, Callable
 
-class CLIOrchestrator:
-    """Dynamic executor for niche system tasks"""
-    def __init__(self, workspace: str = "."):
-        self.root = Path(workspace)
-        self.registry: Dict[str, Any] = {}
+class CleanupEngine:
+    def __init__(self, target_dir: str):
+        self.target_path = Path(target_dir)
 
-    def register_task(self, name: str, func: callable):
-        self.registry[name] = func
+    def run_sanitization(self, filters: List[Callable[[Path], bool]]) -> None:
+        if not self.target_path.exists():
+            return
+        for item in self.target_path.iterdir():
+            if all(f(item) for f in filters):
+                self._obliterate(item)
 
-    def execute(self, task_name: str, *args, **kwargs):
-        if task_name not in self.registry:
-            raise ValueError(f"task {task_name} unknown")
-        return self.registry[task_name](*args, **kwargs)
+    def _obliterate(self, path: Path) -> None:
+        if path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
 
-    def cleanup_temp_files(self, pattern: str = "*.tmp"):
-        files = list(self.root.glob(pattern))
-        for file in files:
-            try:
-                file.unlink()
-            except OSError:
-                pass
-        return len(files)
+def is_temp_file(p: Path) -> bool:
+    return p.suffix in {'.tmp', '.log', '.bak'}
 
-def initialize_app(cfg: Dict[str, Any]) -> CLIOrchestrator:
-    app = CLIOrchestrator(cfg.get("path", "."))
-    app.register_task("purge", app.cleanup_temp_files)
-    return app
+def is_stale_dir(p: Path) -> bool:
+    return p.is_dir() and p.name.startswith('__')
 
-if __name__ == "__main__":
-    # usage demonstration of the orchestrated pattern
-    instance = initialize_app({"path": "/tmp"})
-    print(f"processed {instance.execute('purge')} files")
+if __name__ == '__main__':
+    engine = CleanupEngine(os.getcwd())
+    engine.run_sanitization([is_temp_file])
+    engine.run_sanitization([is_stale_dir])
