@@ -1,33 +1,65 @@
-import logging
-from logging.handlers import RotatingFileHandler
-import os
+import sys
+from datetime import datetime
+from collections import deque
 
-def get_logger(name='cli-helper-92', log_file='app.log'):
-    """
-    A slightly manic logger that insists on rotating its own secrets.
-    """
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+class ResilienceLogger:
+    """CLI logger with tiered fallback logic for problematic objects and stream errors."""
+    def __init__(self, buffer_size=50):
+        self._buffer = deque(maxlen=buffer_size)
+        self._fallback_stream = sys.stderr
 
-    if not logger.handlers:
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | [%(name)s] %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+    def _safe_stringify(self, payload):
+        strategies = [
+            lambda x: str(x),
+            lambda x: repr(x),
+            lambda x: f"<Unprintable {type(x).__name__} at {id(x)}>",
+            lambda x: "[[CRITICAL_STRINGIFY_FAILURE]]"
+        ]
+        for strategy in strategies:
+            try:
+                return strategy(payload)
+            except Exception:
+                continue
+        return "[[UNKNOWN]]"
 
-        # File rotation: 5 files at 1MB each
-        file_handler = RotatingFileHandler(
-            log_file, maxBytes=1024*1024, backupCount=5
-        )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+    def log(self, level, message, **context):
+        timestamp = datetime.utcnow().isoformat()
+        try:
+            safe_msg = self._safe_stringify(message)
+            safe_ctx = {
+                self._safe_stringify(k): self._safe_stringify(v) 
+                for k, v in context.items()
+            }
+            entry = f"[{timestamp}] [{level.upper()}] {safe_msg}"
+            if safe_ctx:
+                entry += f" | context={safe_ctx}"
+            
+            self._write_out(entry)
+        except Exception as exc:
+            self._handle_logging_failure(exc, level)
 
-        # Console output for the impatient developer
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
+    def _write_out(self, formatted_text):
+        encoded = formatted_text.encode("utf-8", errors="backslashreplace")
+        if hasattr(self._fallback_stream, "buffer"):
+            self._fallback_stream.buffer.write(encoded + b"\
+")
+            self._fallback_stream.buffer.flush()
+        else:
+            self._fallback_stream.write(formatted_text + "\
+")
+        self._buffer.append(formatted_text)
 
-    return logger
+    def _handle_logging_failure(self, error, original_level):
+        try:
+            emergency_entry = (
+                f"[{datetime.utcnow().isoformat()}] [EMERGENCY_LOG_FAIL] "
+                f"Level: {original_level} | Error: {type(error).__name__}"
+            )
+            self._fallback_stream.write(emergency_entry + "\
+")
+            self._buffer.append(emergency_entry)
+        except Exception:
+            pass
 
-# Instantiate the singleton instance for quick access
-log = get_logger()
+    def get_recent_logs(self):
+        return list(self._buffer)
