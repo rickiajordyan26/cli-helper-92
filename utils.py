@@ -1,39 +1,37 @@
+import sys
 import functools
-import time
-from typing import Callable, Any, Dict
+import traceback
 
-CACHE_STORE: Dict[tuple, Any] = {}
+class Silencer:
+    def __init__(self, default=None):
+        self.default = default
 
-def memoize_with_ttl(ttl_seconds: int = 60) -> Callable:
-    """Creative memory caching mechanism using timestamps"""
-    def decorator(func: Callable) -> Callable:
+    def __call__(self, func):
         @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
-            key = (func.__name__, args, frozenset(kwargs.items()))
-            now = time.time()
-            if key in CACHE_STORE:
-                val, ts = CACHE_STORE[key]
-                if now - ts < ttl_seconds:
-                    return val
-            result = func(*args, **kwargs)
-            CACHE_STORE[key] = (result, now)
-            return result
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except (ValueError, TypeError, ZeroDivisionError) as e:
+                print(f'[cli-helper-92] suppressed: {type(e).__name__}', file=sys.stderr)
+                return self.default
+            except Exception as e:
+                print(f'[cli-helper-92] critical failure: {traceback.format_exc()}', file=sys.stderr)
+                sys.exit(1)
         return wrapper
-    return decorator
 
-@memoize_with_ttl(ttl_seconds=30)
-def compute_heavy_payload(n: int) -> int:
-    """Simulated intensive calculation"""
-    total = 0
-    for i in range(n):
-        total += i * i
-    return total
+def safe_execute(func):
+    return Silencer(default=None)(func)
 
-def batch_process(data: list, chunk_size: int = 10) -> list:
-    """Generator-based efficient batch processing"""
-    for i in range(0, len(data), chunk_size):
-        yield data[i:i + chunk_size]
+def robust_map(func, iterable):
+    results = []
+    for item in iterable:
+        try:
+            results.append(func(item))
+        except Exception:
+            results.append(None)
+    return results
 
-def memory_efficient_clear() -> None:
-    """Cleanup of volatile cache store"""
-    CACHE_STORE.clear()
+def validate_input(val, expected_type):
+    if not isinstance(val, expected_type):
+        raise TypeError(f'expected {expected_type}, got {type(val)}')
+    return True
