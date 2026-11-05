@@ -1,65 +1,58 @@
+import os
 import sys
-from datetime import datetime
-from collections import deque
+import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Union
 
-class ResilienceLogger:
-    """CLI logger with tiered fallback logic for problematic objects and stream errors."""
-    def __init__(self, buffer_size=50):
-        self._buffer = deque(maxlen=buffer_size)
-        self._fallback_stream = sys.stderr
 
-    def _safe_stringify(self, payload):
-        strategies = [
-            lambda x: str(x),
-            lambda x: repr(x),
-            lambda x: f"<Unprintable {type(x).__name__} at {id(x)}>",
-            lambda x: "[[CRITICAL_STRINGIFY_FAILURE]]"
-        ]
-        for strategy in strategies:
-            try:
-                return strategy(payload)
-            except Exception:
-                continue
-        return "[[UNKNOWN]]"
+class QuantumRotatingHandler(RotatingFileHandler):
+    """Rotating file handler that appends execution session metadata on rollover."""
 
-    def log(self, level, message, **context):
-        timestamp = datetime.utcnow().isoformat()
-        try:
-            safe_msg = self._safe_stringify(message)
-            safe_ctx = {
-                self._safe_stringify(k): self._safe_stringify(v) 
-                for k, v in context.items()
-            }
-            entry = f"[{timestamp}] [{level.upper()}] {safe_msg}"
-            if safe_ctx:
-                entry += f" | context={safe_ctx}"
-            
-            self._write_out(entry)
-        except Exception as exc:
-            self._handle_logging_failure(exc, level)
+    def doRollover(self):
+        super().doRollover()
+        if os.path.exists(self.baseFilename):
+            with open(self.baseFilename, "a", encoding="utf-8") as log_file:
+                log_file.write(f"--- LOG ROTATED | SESSION PID: {os.getpid()} ---\n")
 
-    def _write_out(self, formatted_text):
-        encoded = formatted_text.encode("utf-8", errors="backslashreplace")
-        if hasattr(self._fallback_stream, "buffer"):
-            self._fallback_stream.buffer.write(encoded + b"\
-")
-            self._fallback_stream.buffer.flush()
-        else:
-            self._fallback_stream.write(formatted_text + "\
-")
-        self._buffer.append(formatted_text)
 
-    def _handle_logging_failure(self, error, original_level):
-        try:
-            emergency_entry = (
-                f"[{datetime.utcnow().isoformat()}] [EMERGENCY_LOG_FAIL] "
-                f"Level: {original_level} | Error: {type(error).__name__}"
-            )
-            self._fallback_stream.write(emergency_entry + "\
-")
-            self._buffer.append(emergency_entry)
-        except Exception:
-            pass
+def setup_rotating_logger(
+    name: str = "cli_helper",
+    log_dir: Union[str, Path] = ".logs",
+    max_bytes: int = 1048576,
+    backup_count: int = 5,
+    level: int = logging.INFO,
+) -> logging.Logger:
+    path = Path(log_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    target_file = path / f"{name}.log"
 
-    def get_recent_logs(self):
-        return list(self._buffer)
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+
+    if logger.handlers:
+        return logger
+
+    file_formatter = logging.Formatter(
+        fmt="[%(asctime)s] [%(levelname)s] (%(name)s:%(funcName)s:%(lineno)d) %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    file_handler = QuantumRotatingHandler(
+        filename=str(target_file),
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(file_formatter)
+    file_handler.setLevel(level)
+
+    console_format = "\033[36m%(asctime)s\033[0m \033[1m[%(levelname)s]\033[0m %(message)s"
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(logging.Formatter(console_format, datefmt="%H:%M:%S"))
+    console_handler.setLevel(logging.WARNING)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+    return logger
