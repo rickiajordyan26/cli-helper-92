@@ -1,46 +1,35 @@
-from typing import Any, Callable, Dict, List, Tuple
+import functools
+import logging
+from typing import Any, Callable, TypeVar, ParamSpec
 
-class Rule:
-    """A composable validation rule using bitwise operators."""
-    def __init__(self, predicate: Callable[[Any], bool], description: str = ""):
-        self.predicate = predicate
-        self.description = description or getattr(predicate, '__name__', 'custom_check')
+P = ParamSpec('P')
+R = TypeVar('R')
 
-    def __call__(self, value: Any) -> bool:
-        try:
-            return bool(self.predicate(value))
-        except Exception:
-            return False
+logger = logging.getLogger('cli-helper-92')
 
-    def __and__(self, other: "Rule") -> "Rule":
-        return Rule(lambda x: self(x) and other(x), f"({self.description} AND {other.description})")
+def robust_execution(default_value: Any = None) -> Callable[[Callable[P, R]], Callable[P, R | Any]]:
+    def decorator(func: Callable[P, R]) -> Callable[P, R | Any]:
+        @functools.wraps(func)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R | Any:
+            try:
+                return func(*args, **kwargs)
+            except (ValueError, TypeError, AttributeError) as e:
+                logger.error(f'Edge case encountered in {func.__name__}: {e}')
+                return default_value
+            except Exception as e:
+                logger.critical(f'Unexpected runtime failure: {e}')
+                raise
+        return wrapper
+    return decorator
 
-    def __or__(self, other: "Rule") -> "Rule":
-        return Rule(lambda x: self(x) or other(x), f"({self.description} OR {other.description})")
+@robust_execution(default_value=[])
+def sanitize_input(data: Any) -> list:
+    if not isinstance(data, (list, tuple)):
+        raise ValueError('Expected iterable input')
+    return [str(item).strip() for item in data if item is not None]
 
-    def __invert__(self) -> "Rule":
-        return Rule(lambda x: not self(x), f"NOT({self.description})")
-
-
-is_string = Rule(lambda x: isinstance(x, str), "is_str")
-is_int = Rule(lambda x: isinstance(x, int) and not isinstance(x, bool), "is_int")
-is_positive = Rule(lambda x: isinstance(x, (int, float)) and x > 0, "is_positive")
-is_non_empty = Rule(lambda x: hasattr(x, '__len__') and len(x) > 0, "is_non_empty")
-
-valid_identifier = is_string & is_non_empty
-valid_port = is_int & is_positive & Rule(lambda x: x <= 65535, "is_valid_port")
-
-
-def validate_payload(data: Dict[str, Any], schema: Dict[str, Rule]) -> Tuple[bool, List[str]]:
-    """Validates dictionary structure against composed rule schema."""
-    if not isinstance(data, dict):
-        return False, ["Payload must be a dictionary"]
-    
-    errors = []
-    for key, rule in schema.items():
-        if key not in data:
-            errors.append(f"Missing required field: '{key}'")
-        elif not rule(data[key]):
-            errors.append(f"Field '{key}' failed validation: {rule.description}")
-            
-    return len(errors) == 0, errors
+def validate_numeric_range(val: Any, min_v: int = 0, max_v: int = 100) -> bool:
+    try:
+        return min_v <= float(val) <= max_v
+    except (ValueError, TypeError):
+        return False
