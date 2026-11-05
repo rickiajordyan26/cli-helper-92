@@ -1,32 +1,41 @@
-import os
-import shutil
-from pathlib import Path
-from typing import List, Callable
+import functools
+import time
+from typing import Callable, Any
 
-class CleanupEngine:
-    def __init__(self, target_dir: str):
-        self.target_path = Path(target_dir)
+class CoreEngine:
+    def __init__(self):
+        self._cache = {}
+        self._stats = {'hits': 0, 'misses': 0}
 
-    def run_sanitization(self, filters: List[Callable[[Path], bool]]) -> None:
-        if not self.target_path.exists():
-            return
-        for item in self.target_path.iterdir():
-            if all(f(item) for f in filters):
-                self._obliterate(item)
+    def memoize_with_ttl(ttl: int = 60):
+        def decorator(func: Callable):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                key = (func.__name__, args, frozenset(kwargs.items()))
+                now = time.time()
+                if key in self._cache:
+                    val, ts = self._cache[key]
+                    if now - ts < ttl:
+                        self._stats['hits'] += 1
+                        return val
+                
+                result = func(*args, **kwargs)
+                self._cache[key] = (result, now)
+                self._stats['misses'] += 1
+                return result
+            return wrapper
+        return decorator
 
-    def _obliterate(self, path: Path) -> None:
-        if path.is_file():
-            path.unlink()
-        elif path.is_dir():
-            shutil.rmtree(path)
+    def process_heavy_payload(self, data: list):
+        return sum(self._transform(x) for x in data)
 
-def is_temp_file(p: Path) -> bool:
-    return p.suffix in {'.tmp', '.log', '.bak'}
+    @memoize_with_ttl(ttl=30)
+    def _transform(self, x: int) -> int:
+        # Simulated expensive computation
+        time.sleep(0.1)
+        return x * x
 
-def is_stale_dir(p: Path) -> bool:
-    return p.is_dir() and p.name.startswith('__')
-
-if __name__ == '__main__':
-    engine = CleanupEngine(os.getcwd())
-    engine.run_sanitization([is_temp_file])
-    engine.run_sanitization([is_stale_dir])
+    def get_metrics(self):
+        total = self._stats['hits'] + self._stats['misses']
+        if total == 0: return 0.0
+        return self._stats['hits'] / total
