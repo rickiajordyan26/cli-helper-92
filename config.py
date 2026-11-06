@@ -1,30 +1,38 @@
+import json
 import os
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
 
-class Settings:
-    def __init__(self):
-        self._data: Dict[str, Any] = {
-            "root": Path(__file__).parent.parent,
-            "env": os.getenv("CLI_ENV", "production"),
-            "timeout": int(os.getenv("CLI_TIMEOUT", 30)),
-            "verbose": os.getenv("CLI_VERBOSE", "false").lower() == "true"
-        }
+class ConfigLoader:
+    def __init__(self, path: str = 'config.json', defaults: Dict[str, Any] = None):
+        self.path = Path(path)
+        self.defaults = defaults or {}
+        self.data = self._initialize()
 
-    def __getitem__(self, key: str) -> Any:
-        return self._data.get(key)
+    def _initialize(self) -> Dict[str, Any]:
+        if not self.path.exists():
+            self._write_defaults()
+            return self.defaults
+        try:
+            with open(self.path, 'r') as f:
+                content = json.load(f)
+                return {**self.defaults, **content}
+        except (json.JSONDecodeError, IOError):
+            return self.defaults
 
-    def __repr__(self) -> str:
-        return f"<Config env={self._data['env']} verbose={self._data['verbose']}>"
+    def _write_defaults(self) -> None:
+        try:
+            with open(self.path, 'w') as f:
+                json.dump(self.defaults, f, indent=4)
+        except IOError:
+            pass
 
-    def refresh(self) -> None:
-        self._data.update({
-            "root": Path(__file__).parent.parent,
-            "env": os.getenv("CLI_ENV", "production"),
-            "timeout": int(os.getenv("CLI_TIMEOUT", 30))
-        })
+    def get(self, key: str, fallback: Any = None) -> Any:
+        return self.data.get(key, fallback)
 
-settings = Settings()
+def load_app_config(defaults: Dict[str, Any]) -> ConfigLoader:
+    return ConfigLoader(defaults=defaults)
 
-def get_config() -> Settings:
-    return settings
+# Example usage:
+# config = load_app_config({'theme': 'dark', 'verbose': False})
+# print(config.get('theme'))
