@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 from typing import Any, Dict
 
@@ -15,8 +14,8 @@ class ConfigLoader:
             return self.defaults
         try:
             with open(self.path, 'r') as f:
-                content = json.load(f)
-                return {**self.defaults, **content}
+                loaded = json.load(f)
+                return {**self.defaults, **loaded}
         except (json.JSONDecodeError, IOError):
             return self.defaults
 
@@ -30,9 +29,8 @@ class ConfigLoader:
     def get(self, key: str, fallback: Any = None) -> Any:
         return self.data.get(key, fallback)
 
-def load_app_config(defaults: Dict[str, Any]) -> ConfigLoader:
-    return ConfigLoader(defaults=defaults)
+    def __getitem__(self, key: str) -> Any:
+        return self.data[key]
 
-# Example usage:
-# config = load_app_config({'theme': 'dark', 'verbose': False})
-# print(config.get('theme'))
+    def __repr__(self) -> str:
+        return f"ConfigLoader(source='{self.path}', keys={list(self.data.keys())})"
