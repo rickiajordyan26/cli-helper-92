@@ -1,41 +1,56 @@
 import functools
-import time
-from typing import Callable, Any
+import sys
+from typing import Any, Callable, Dict, Tuple
 
-class CoreEngine:
-    def __init__(self):
-        self._cache = {}
-        self._stats = {'hits': 0, 'misses': 0}
 
-    def memoize_with_ttl(ttl: int = 60):
-        def decorator(func: Callable):
-            @functools.wraps(func)
-            def wrapper(*args, **kwargs):
-                key = (func.__name__, args, frozenset(kwargs.items()))
-                now = time.time()
-                if key in self._cache:
-                    val, ts = self._cache[key]
-                    if now - ts < ttl:
-                        self._stats['hits'] += 1
-                        return val
-                
-                result = func(*args, **kwargs)
-                self._cache[key] = (result, now)
-                self._stats['misses'] += 1
-                return result
-            return wrapper
+class OptimizedDispatcher:
+    """Fast dynamic command dispatch engine using interned string caches."""
+
+    __slots__ = ("_registry", "_cache", "_hits", "_misses")
+
+    def __init__(self) -> None:
+        self._registry: Dict[str, Callable[..., Any]] = {}
+        self._cache: Dict[Tuple[str, Tuple[Any, ...]], Any] = {}
+        self._hits: int = 0
+        self._misses: int = 0
+
+    def register(self, name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            self._registry[sys.intern(name)] = func
+            return func
+
         return decorator
 
-    def process_heavy_payload(self, data: list):
-        return sum(self._transform(x) for x in data)
+    @functools.lru_cache(maxsize=2048)
+    def _tokenize(self, raw_cmd: str) -> Tuple[str, ...]:
+        return tuple(sys.intern(token) for token in raw_cmd.strip().split())
 
-    @memoize_with_ttl(ttl=30)
-    def _transform(self, x: int) -> int:
-        # Simulated expensive computation
-        time.sleep(0.1)
-        return x * x
+    def dispatch(self, raw_input: str, *extra_args: Any) -> Any:
+        tokens = self._tokenize(raw_input)
+        if not tokens:
+            return None
 
-    def get_metrics(self):
-        total = self._stats['hits'] + self._stats['misses']
-        if total == 0: return 0.0
-        return self._stats['hits'] / total
+        cmd, args = tokens[0], tokens[1:] + extra_args
+        cache_key = (cmd, args)
+
+        if cache_key in self._cache:
+            self._hits += 1
+            return self._cache[cache_key]
+
+        self._misses += 1
+        handler = self._registry.get(cmd)
+        if not handler:
+            raise KeyError(f"Command '{cmd}' not found in runtime registry")
+
+        res = handler(*args)
+        self._cache[cache_key] = res
+        return res
+
+    def get_stats(self) -> Dict[str, int]:
+        return {"hits": self._hits, "misses": self._misses, "cache_size": len(self._cache)}
+
+    def flush(self) -> None:
+        self._cache.clear()
+        self._tokenize.cache_clear()
+        self._hits = 0
+        self._misses = 0
