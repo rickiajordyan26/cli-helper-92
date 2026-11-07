@@ -3,58 +3,49 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-class PaletteFormatter(logging.Formatter):
-    """Custom formatter injecting ANSI log colors into terminal streams."""
-    COLORS = {
-        logging.DEBUG: "\033[36m",    # Cyan
-        logging.INFO: "\033[32m",     # Green
-        logging.WARNING: "\033[33m",  # Yellow
-        logging.ERROR: "\033[31m",    # Red
-        logging.CRITICAL: "\033[35m", # Magenta
-    }
-    RESET = "\033[0m"
+class DynamicContextFilter(logging.Filter):
+    def __init__(self, context_tag: str = "cli-92"):
+        super().__init__()
+        self.context_tag = context_tag
 
-    def format(self, record: logging.LogRecord) -> str:
-        color = self.COLORS.get(record.levelno, self.RESET)
-        original_level = record.levelname
-        record.levelname = f"{color}{record.levelname:<8}{self.RESET}"
-        formatted = super().format(record)
-        record.levelname = original_level
-        return formatted
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.tag = self.context_tag
+        record.origin = f"{Path(record.pathname).name}:{record.lineno}"
+        return True
 
 def setup_rotating_logger(
-    app_name: str = "cli_helper",
-    log_dir: str = ".logs",
+    name: str = "cli_helper",
+    filename: str = "app.log",
     max_bytes: int = 512 * 1024,
-    backup_count: int = 3
+    backup_count: int = 3,
+    level: int = logging.INFO
 ) -> logging.Logger:
-    """Initializes dual console and size-rotated file loggers."""
-    target_dir = Path(log_dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    log_file = target_dir / f"{app_name}.log"
-
-    logger = logging.getLogger(app_name)
-    logger.setLevel(logging.DEBUG)
-    logger.handlers.clear()
-
-    log_format = "%(asctime)s | %(levelname)s | %(name)s :: %(message)s"
-    file_formatter = logging.Formatter(log_format)
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
     
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
+    log_dir = Path.cwd() / ".logs"
+    log_dir.mkdir(exist_ok=True)
+    file_path = log_dir / filename
+
     file_handler = RotatingFileHandler(
-        log_file, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
+        file_path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
     )
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(file_formatter)
+    file_fmt = logging.Formatter(
+        "[%(asctime)s] [%(tag)s] [%(levelname)s] (%(origin)s) -> %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    file_handler.setFormatter(file_fmt)
+    file_handler.addFilter(DynamicContextFilter())
 
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(PaletteFormatter(log_format))
+    console_fmt = logging.Formatter("▸ [%(levelname)s] %(message)s")
+    console_handler.setFormatter(console_fmt)
 
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
     return logger
 
-if __name__ == "__main__":
-    log = setup_rotating_logger()
-    log.info("rotating logger subsystem ready")
-    log.warning("storage capacity approaching threshold")
+log = setup_rotating_logger()
