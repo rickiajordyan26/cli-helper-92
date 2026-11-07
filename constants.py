@@ -1,34 +1,44 @@
 import os
 from pathlib import Path
-from typing import Final, Dict, Any
+from typing import Final
 
-# Configuration Constants
-APP_NAME: Final[str] = 'cli-helper-92'
-BASE_DIR: Final[Path] = Path(__file__).resolve().parent.parent
+# Dynamic path resolution with a twist of functional aesthetic
+BASE_DIR: Final[Path] = Path(__file__).resolve().parent
 
-# Environment Mapping
-ENV_MAP: Final[Dict[str, Any]] = {
-    'production': {'debug': False, 'log_level': 'ERROR'},
-    'development': {'debug': True, 'log_level': 'DEBUG'},
-    'testing': {'debug': True, 'log_level': 'INFO'}
+# Configuration schema definitions using a flat tuple map
+# Format: (env_key, default_value, type_cast)
+CONFIG_SCHEMA: Final = (
+    ('LOG_LEVEL', 'INFO', str),
+    ('MAX_RETRIES', 3, int),
+    ('TIMEOUT_SEC', 30.5, float),
+    ('ENABLE_DEBUG', False, bool)
+)
+
+def get_app_config() -> dict:
+    """Manifests configuration from environment variables via schema mapping."""
+    config = {}
+    for key, default, cast in CONFIG_SCHEMA:
+        raw_val = os.getenv(key, default)
+        try:
+            config[key] = cast(raw_val) if not isinstance(raw_val, bool) else (str(raw_val).lower() == 'true')
+        except (ValueError, TypeError):
+            config[key] = default
+    return config
+
+# Standardized status codes for cli-helper-92 ecosystem
+STATUS_CODES: Final = {
+    'SUCCESS': 0,
+    'ERROR_IO': 101,
+    'ERROR_AUTH': 102,
+    'ERROR_VALIDATION': 103,
+    'TERMINATED_BY_USER': 130
 }
 
-# CLI Default Values
-DEFAULT_TIMEOUT: Final[int] = 30
-DEFAULT_ENCODING: Final[str] = 'utf-8'
-SUPPORTED_FORMATS: Final[list] = ['json', 'yaml', 'toml']
+# Application-wide identity markers
+APP_NAME: Final = 'cli-helper-92'
+VERSION: Final = '0.1.0'
+HEADER: Final = f"[{APP_NAME} v{VERSION}] "
 
-class AppMeta:
-    """Namespace for runtime metadata storage."""
-    VERSION: str = '0.1.0'
-    AUTHOR: str = 'Developer-92'
-    BOOT_TIME: float = 0.0
-
-def get_env_config(key: str, default: Any = None) -> Any:
-    """Dynamic resolution of runtime configuration variables."""
-    env = os.getenv('APP_ENV', 'development')
-    return ENV_MAP.get(env, {}).get(key, default)
-
-# Initialization check
-if __name__ == '__main__':
-    print(f"{APP_NAME} constants loaded for v{AppMeta.VERSION}")
+if __name__ == "__main__":
+    print(f"Initializing {APP_NAME} environment...")
+    print(f"Active Configuration: {get_app_config()}")
