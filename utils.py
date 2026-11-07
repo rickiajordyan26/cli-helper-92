@@ -1,37 +1,47 @@
-import sys
 import functools
-import traceback
+import time
+import sys
+from typing import Callable, Any
 
-class Silencer:
-    def __init__(self, default=None):
-        self.default = default
+def time_execution(func: Callable) -> Callable:
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        end = time.perf_counter()
+        print(f'[cli-helper-92] {func.__name__} took {end - start:.4f}s', file=sys.stderr)
+        return result
+    return wrapper
 
-    def __call__(self, func):
+def retry(max_attempts: int = 3, delay: float = 1.0):
+    def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except (ValueError, TypeError, ZeroDivisionError) as e:
-                print(f'[cli-helper-92] suppressed: {type(e).__name__}', file=sys.stderr)
-                return self.default
-            except Exception as e:
-                print(f'[cli-helper-92] critical failure: {traceback.format_exc()}', file=sys.stderr)
-                sys.exit(1)
+            last_ex = None
+            for i in range(max_attempts):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_ex = e
+                    time.sleep(delay * (2 ** i))
+            raise last_ex
         return wrapper
+    return decorator
 
-def safe_execute(func):
-    return Silencer(default=None)(func)
+def flatten(items: list) -> list:
+    return [item for sublist in items for item in (sublist if isinstance(sublist, list) else [sublist])]
 
-def robust_map(func, iterable):
-    results = []
-    for item in iterable:
-        try:
-            results.append(func(item))
-        except Exception:
-            results.append(None)
-    return results
+def chunker(seq: list, size: int):
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
 
-def validate_input(val, expected_type):
-    if not isinstance(val, expected_type):
-        raise TypeError(f'expected {expected_type}, got {type(val)}')
-    return True
+def memoize_file(cache_file: str):
+    def decorator(func: Callable) -> Callable:
+        cache = {}
+        @functools.wraps(func)
+        def wrapper(*args):
+            if args not in cache:
+                cache[args] = func(*args)
+            return cache[args]
+        return wrapper
+    return decorator
